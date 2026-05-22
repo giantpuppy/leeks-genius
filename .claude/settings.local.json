@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter *)",
+      "Bash(git *)",
+      "Bash(java -version)",
+      "Bash(where flutter *)",
+      "Bash(wmic logicaldisk *)",
+      "Bash(curl -sL https://storage.googleapis.com/flutter_infra_release/releases/releases_windows.json)",
+      "Bash(mkdir -p /c/src)",
+      "Read(//c//**)",
+      "Bash(curl -L -o flutter_windows_3.44.0-stable.zip \"https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.44.0-stable.zip\")",
+      "Bash(unzip -q flutter_windows_3.44.0-stable.zip)",
+      "Bash(/c/src/flutter/bin/flutter doctor *)",
+      "Bash(curl -sI \"https://dl.google.com/android/repository/commandlinetools-win-12266719_latest.zip\")",
+      "Bash(mkdir -p /c/Users/giant/AppData/Local/Android/Sdk/cmdline-tools)",
+      "Bash(curl -L -o cmdline-tools.zip \"https://dl.google.com/android/repository/commandlinetools-win-12266719_latest.zip\")",
+      "Bash(unzip -q cmdline-tools.zip)",
+      "Bash(mv cmdline-tools *)",
+      "Bash(rm cmdline-tools.zip)",
+      "Bash(/c/Users/giant/AppData/Local/Android/Sdk/cmdline-tools/latest/bin/sdkmanager.bat *)",
+      "Bash(where java *)",
+      "Bash(curl -L -o /c/src/openjdk17.zip \"https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.14%2B7/OpenJDK17U-jdk_x64_windows_hotspot_17.0.14_7.zip\")",
+      "Bash(unzip -q openjdk17.zip)",
+      "Bash(\"/c/src/jdk-17.0.14+7/bin/java\" -version)",
+      "Bash(export JAVA_HOME=\"/c/src/jdk-17.0.14+7\")",
+      "Bash(echo \"安装 Android SDK 组件...\")",
+      "Bash(yes)",
+      "Bash(echo \"安装组件...\")",
+      "Bash(echo \"安装 SDK 36 和 BuildTools 28.0.3...\")",
+      "Bash(curl -L -o ~/.gradle/wrapper/dists/gradle-8.5-all/3zlzzgtsutfj0pbojr50n2l7z/gradle-8.5-all.zip \"https://downloads.gradle.org/distributions/gradle-8.5-all.zip\")",
+      "Bash(curl -L -o ~/.gradle/wrapper/dists/gradle-8.7-all/6otybm7iwhg1nxq8p2w5cm9dv/gradle-8.7-all.zip \"https://downloads.gradle.org/distributions/gradle-8.7-all.zip\")",
+      "Bash(curl -L -o ~/.gradle/wrapper/dists/gradle-8.14-all/2q7hnv8qqtwf2iir1cqb4q6qe/gradle-8.14-all.zip \"https://downloads.gradle.org/distributions/gradle-8.14-all.zip\")",
+      "Bash(whoami /groups)",
+      "Bash(cmd //c \"mklink test_symlink.txt pubspec.yaml 2>&1 && echo symlink_ok && del test_symlink.txt\")",
+      "Bash(taskkill /F /IM chrome.exe)",
+      "Bash(taskkill /F /IM flutter.exe)",
+      "WebFetch(domain:localhost)"
+    ]
+  }
+}
