@@ -3,6 +3,7 @@ class CastMember {
   int performanceId;
   String role;
   String actorName;
+  bool? isFeatured;
   String? createdAt;
 
   CastMember({
@@ -10,6 +11,7 @@ class CastMember {
     required this.performanceId,
     required this.role,
     required this.actorName,
+    this.isFeatured,
     this.createdAt,
   });
 
@@ -19,6 +21,7 @@ class CastMember {
       'performance_id': performanceId,
       'role': role,
       'actor_name': actorName,
+      'is_featured': isFeatured == true ? 1 : 0,
       'created_at': createdAt,
     };
   }
@@ -29,6 +32,7 @@ class CastMember {
       performanceId: map['performance_id'] as int,
       role: map['role'] as String,
       actorName: map['actor_name'] as String,
+      isFeatured: map['is_featured'] == 1,
       createdAt: map['created_at'] as String?,
     );
   }
@@ -38,6 +42,7 @@ class CastMember {
     int? performanceId,
     String? role,
     String? actorName,
+    bool? isFeatured,
     String? createdAt,
   }) {
     return CastMember(
@@ -45,6 +50,7 @@ class CastMember {
       performanceId: performanceId ?? this.performanceId,
       role: role ?? this.role,
       actorName: actorName ?? this.actorName,
+      isFeatured: isFeatured ?? this.isFeatured,
       createdAt: createdAt ?? this.createdAt,
     );
   }

@@ -29,7 +29,17 @@ class _WebDB {
         _tables.clear();
         for (final entry in tables.entries) {
           final rows = (entry.value as List).cast<Map<String, dynamic>>();
-          _tables[entry.key] = rows.map((r) => Map<String, dynamic>.from(r)).toList();
+          _tables[entry.key] = rows.map((r) {
+            final row = Map<String, dynamic>.from(r);
+            // 旧数据迁移
+            if (entry.key == 'performances' && !row.containsKey('status')) {
+              row['status'] = 'unmarked';
+            }
+            if (entry.key == 'cast_members' && !row.containsKey('is_featured')) {
+              row['is_featured'] = 0;
+            }
+            return row;
+          }).toList();
         }
       }
       if (ai != null) {
@@ -263,6 +273,7 @@ class DatabaseHelper {
         time TEXT,
         seat TEXT,
         price REAL,
+        status TEXT DEFAULT 'unmarked',
         created_at TEXT,
         FOREIGN KEY (show_id) REFERENCES shows (id) ON DELETE CASCADE
       )
@@ -273,6 +284,7 @@ class DatabaseHelper {
         performance_id INTEGER NOT NULL,
         role TEXT NOT NULL,
         actor_name TEXT NOT NULL,
+        is_featured INTEGER DEFAULT 0,
         created_at TEXT,
         FOREIGN KEY (performance_id) REFERENCES performances (id) ON DELETE CASCADE
       )

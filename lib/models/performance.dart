@@ -5,6 +5,7 @@ class Performance {
   String? time;
   String? seat;
   double? price;
+  String? status; // unmarked | want_to_see | bought
   String? createdAt;
 
   Performance({
@@ -14,6 +15,7 @@ class Performance {
     this.time,
     this.seat,
     this.price,
+    this.status,
     this.createdAt,
   });
 
@@ -25,6 +27,7 @@ class Performance {
       'time': time,
       'seat': seat,
       'price': price,
+      'status': status ?? 'unmarked',
       'created_at': createdAt,
     };
   }
@@ -37,6 +40,7 @@ class Performance {
       time: map['time'] as String?,
       seat: map['seat'] as String?,
       price: map['price'] != null ? (map['price'] as num).toDouble() : null,
+      status: map['status'] as String? ?? 'unmarked',
       createdAt: map['created_at'] as String?,
     );
   }
@@ -48,6 +52,7 @@ class Performance {
     String? time,
     String? seat,
     double? price,
+    String? status,
     String? createdAt,
   }) {
     return Performance(
@@ -57,6 +62,7 @@ class Performance {
       time: time ?? this.time,
       seat: seat ?? this.seat,
       price: price ?? this.price,
+      status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
     );
   }

@@ -21,7 +21,21 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    return await openDatabase(
+      path,
+      version: 3,
+      onCreate: _createDB,
+      onUpgrade: _upgradeDB,
+    );
+  }
+
+  Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE performances ADD COLUMN status TEXT DEFAULT \'unmarked\'');
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE cast_members ADD COLUMN is_featured INTEGER DEFAULT 0');
+    }
   }
 
   Future _createDB(Database db, int version) async {
@@ -42,6 +56,7 @@ class DatabaseHelper {
         time TEXT,
         seat TEXT,
         price REAL,
+        status TEXT DEFAULT 'unmarked',
         created_at TEXT,
         FOREIGN KEY (show_id) REFERENCES shows (id) ON DELETE CASCADE
       )
@@ -53,6 +68,7 @@ class DatabaseHelper {
         performance_id INTEGER NOT NULL,
         role TEXT NOT NULL,
         actor_name TEXT NOT NULL,
+        is_featured INTEGER DEFAULT 0,
         created_at TEXT,
         FOREIGN KEY (performance_id) REFERENCES performances (id) ON DELETE CASCADE
       )

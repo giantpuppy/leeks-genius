@@ -2,9 +2,57 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
 import '../models/performance.dart';
+import '../models/cast_member.dart';
+import '../models/actor.dart';
 import 'add_show_screen.dart';
 
-enum ViewMode { day, week, month }
+enum PerformanceStatus { unmarked, wantToSee, bought }
+
+extension PerformanceStatusExt on PerformanceStatus {
+  String get value {
+    switch (this) {
+      case PerformanceStatus.unmarked:
+        return 'unmarked';
+      case PerformanceStatus.wantToSee:
+        return 'want_to_see';
+      case PerformanceStatus.bought:
+        return 'bought';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case PerformanceStatus.unmarked:
+        return '未标记';
+      case PerformanceStatus.wantToSee:
+        return '想看';
+      case PerformanceStatus.bought:
+        return '已买';
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case PerformanceStatus.unmarked:
+        return const Color(0xFF9CA3AF);
+      case PerformanceStatus.wantToSee:
+        return const Color(0xFF811FE2);
+      case PerformanceStatus.bought:
+        return const Color(0xFF34D399);
+    }
+  }
+}
+
+PerformanceStatus statusFromString(String? s) {
+  switch (s) {
+    case 'want_to_see':
+      return PerformanceStatus.wantToSee;
+    case 'bought':
+      return PerformanceStatus.bought;
+    default:
+      return PerformanceStatus.unmarked;
+  }
+}
 
 class GanttScreen extends StatefulWidget {
   const GanttScreen({super.key});
@@ -15,27 +63,22 @@ class GanttScreen extends StatefulWidget {
 
 class _GanttScreenState extends State<GanttScreen> {
   List<Map<String, dynamic>> _performances = [];
+  Map<int, List<CastMember>> _castMap = {};
   bool _isLoading = true;
 
-  ViewMode _viewMode = ViewMode.week;
+  DateTime _weekStart = _getWeekStart(DateTime.now());
 
   final DateFormat _fullDateFormat = DateFormat('yyyy-MM-dd');
 
-  final ScrollController _hScrollController = ScrollController();
+  static const double _layerHeight = 64;
+  static const double _layerGap = 3;
+  static const double _rowPadding = 8;
+  static const double _headerHeight = 48;
+  static const double _leftPanelWidth = 90;
 
-  static const double _rowHeight = 56;
-  static const double _headerHeight = 44;
-  static const double _leftPanelWidth = 200;
-
-  double get _cellWidth {
-    switch (_viewMode) {
-      case ViewMode.day:
-        return 72;
-      case ViewMode.week:
-        return 48;
-      case ViewMode.month:
-        return 32;
-    }
+  static DateTime _getWeekStart(DateTime date) {
+    final d = DateTime(date.year, date.month, date.day);
+    return d.subtract(Duration(days: d.weekday - 1));
   }
 
   @override
@@ -44,84 +87,60 @@ class _GanttScreenState extends State<GanttScreen> {
     _loadData();
   }
 
-  @override
-  void dispose() {
-    _hScrollController.dispose();
-    super.dispose();
-  }
-
   Future<void> _loadData() async {
     final db = DatabaseHelper.instance;
     final performances = await db.getAllPerformancesWithShow();
+    final castMap = <int, List<CastMember>>{};
+    for (final perf in performances) {
+      final perfId = perf['id'] as int;
+      final casts = await db.getCastMembersByPerformanceId(perfId);
+      castMap[perfId] = casts;
+    }
     setState(() {
       _performances = performances;
+      _castMap = castMap;
       _isLoading = false;
     });
-  }
-
-  DateTimeRange _getDisplayRange() {
-    if (_performances.isEmpty) {
-      final today = DateTime.now();
-      return DateTimeRange(
-        start: today.subtract(const Duration(days: 7)),
-        end: today.add(const Duration(days: 60)),
-      );
-    }
-
-    final dates = _performances
-        .map((p) => DateTime.parse(p['date'] as String))
-        .toList();
-    dates.sort();
-
-    final minDate = dates.first;
-    final maxDate = dates.last;
-    final today = DateTime.now();
-
-    final startBuffer = Duration(days: _viewMode == ViewMode.month ? 14 : 7);
-    var start = minDate.isBefore(today.subtract(startBuffer))
-        ? minDate
-        : today.subtract(startBuffer);
-
-    final endBuffer = Duration(days: _viewMode == ViewMode.month ? 120 : 45);
-    var end = maxDate.isAfter(today.add(endBuffer))
-        ? maxDate
-        : today.add(endBuffer);
-
-    if (_viewMode == ViewMode.month) {
-      start = DateTime(start.year, start.month, 1);
-      end = DateTime(end.year, end.month + 1, 0);
-    }
-
-    return DateTimeRange(start: start, end: end);
-  }
-
-  double _getTodayOffset(DateTime startDate) {
-    final today = DateTime.now();
-    final daysDiff = DateTime(today.year, today.month, today.day)
-        .difference(
-            DateTime(startDate.year, startDate.month, startDate.day))
-        .inDays;
-    return daysDiff * _cellWidth;
   }
 
   bool _isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  void _scrollToToday() {
-    final range = _getDisplayRange();
-    final offset = _getTodayOffset(range.start);
-    final screenWidth = MediaQuery.of(context).size.width - _leftPanelWidth;
-    _hScrollController.animateTo(
-      (offset - screenWidth / 2).clamp(
-        0.0,
-        _hScrollController.hasClients
-            ? _hScrollController.position.maxScrollExtent
-            : double.infinity,
-      ),
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-    );
+  void _prevWeek() {
+    setState(() {
+      _weekStart = _weekStart.subtract(const Duration(days: 7));
+    });
+  }
+
+  void _nextWeek() {
+    setState(() {
+      _weekStart = _weekStart.add(const Duration(days: 7));
+    });
+  }
+
+  void _goToToday() {
+    setState(() {
+      _weekStart = _getWeekStart(DateTime.now());
+    });
+  }
+
+  int _getLayers(int showId, List<Map<String, dynamic>> perfs) {
+    final dayCounts = <String, int>{};
+    for (final p in perfs) {
+      if (p['show_id'] != showId) continue;
+      final date = p['date'] as String;
+      dayCounts[date] = (dayCounts[date] ?? 0) + 1;
+    }
+    if (dayCounts.isEmpty) return 1;
+    return dayCounts.values.reduce((a, b) => a > b ? a : b);
+  }
+
+  double _getRowHeight(int layers) {
+    return _rowPadding +
+        layers * _layerHeight +
+        (layers - 1) * _layerGap +
+        _rowPadding;
   }
 
   Color _getShowColor(int showId) {
@@ -138,29 +157,109 @@ class _GanttScreenState extends State<GanttScreen> {
     return colors[showId.abs() % colors.length];
   }
 
+  // ==================== 状态操作 ====================
+
+  Future<void> _updateStatus(int perfId, String status) async {
+    final db = DatabaseHelper.instance;
+    final perf = await db.getPerformanceById(perfId);
+    if (perf == null) return;
+    await db.updatePerformance(perf.copyWith(status: status));
+    _loadData();
+  }
+
+  Future<void> _showBoughtForm(int perfId) async {
+    final seatController = TextEditingController();
+    final priceController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('补充购票信息'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: seatController,
+              decoration: const InputDecoration(
+                labelText: '座位',
+                hintText: '如: 1排1座',
+                prefixIcon: Icon(Icons.event_seat_outlined),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: priceController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: '票价',
+                hintText: '如: 180',
+                prefixIcon: Icon(Icons.attach_money),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('跳过'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      final db = DatabaseHelper.instance;
+      final perf = await db.getPerformanceById(perfId);
+      if (perf != null) {
+        await db.updatePerformance(perf.copyWith(
+          status: 'bought',
+          seat: seatController.text.isNotEmpty ? seatController.text : null,
+          price: priceController.text.isNotEmpty
+              ? double.tryParse(priceController.text)
+              : null,
+        ));
+        _loadData();
+      }
+    } else if (result == false) {
+      await _updateStatus(perfId, 'bought');
+    }
+
+    seatController.dispose();
+    priceController.dispose();
+  }
+
+  // ==================== 详情面板 ====================
+
   void _showPerformanceDetail(Map<String, dynamic> perf) {
+    final status = statusFromString(perf['status'] as String?);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) => _buildDetailSheet(perf),
+      builder: (context) => _buildDetailSheet(perf, status),
     );
   }
 
-  Widget _buildDetailSheet(Map<String, dynamic> perf) {
+  Widget _buildDetailSheet(Map<String, dynamic> perf, PerformanceStatus status) {
     final showName = perf['show_name'] as String? ?? '未知';
     final theater = perf['theater'] as String? ?? '';
     final date = perf['date'] as String? ?? '';
     final time = perf['time'] as String? ?? '';
     final seat = perf['seat'] as String? ?? '';
     final price = perf['price'] != null ? '¥${perf['price']}' : '';
+    final perfId = perf['id'] as int;
+    final casts = _castMap[perfId] ?? [];
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.45,
+      initialChildSize: 0.65,
       minChildSize: 0.3,
-      maxChildSize: 0.7,
+      maxChildSize: 0.8,
       expand: false,
       builder: (context, scrollController) {
         return Container(
@@ -190,16 +289,21 @@ class _GanttScreenState extends State<GanttScreen> {
                       ),
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.edit_outlined),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _editPerformance(perf);
-                    },
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.delete_outline, color: Colors.red[400]),
-                    onPressed: () => _confirmDelete(perf),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: status.color.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: status.color.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      status.label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: status.color,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -216,7 +320,7 @@ class _GanttScreenState extends State<GanttScreen> {
                     ],
                   ),
                 ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -235,10 +339,163 @@ class _GanttScreenState extends State<GanttScreen> {
                   ],
                 ),
               ),
+              if (casts.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text('卡司',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700])),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: casts.map((c) {
+                    final isFeatured = c.isFeatured == true;
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: isFeatured
+                            ? const Color(0xFF811FE2).withValues(alpha: 0.08)
+                            : Colors.grey[100],
+                        borderRadius: BorderRadius.circular(8),
+                        border: isFeatured
+                            ? Border.all(
+                                color: const Color(0xFF811FE2)
+                                    .withValues(alpha: 0.3))
+                            : null,
+                      ),
+                      child: Text(
+                        '${c.role}: ${c.actorName}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isFeatured
+                              ? const Color(0xFF811FE2)
+                              : Colors.grey[700],
+                          fontWeight:
+                              isFeatured ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+              const SizedBox(height: 20),
+              Text('标记状态',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[700])),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _buildStatusButton(
+                    label: '想看',
+                    icon: Icons.star_border,
+                    color: PerformanceStatus.wantToSee.color,
+                    isActive: status == PerformanceStatus.wantToSee,
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await _updateStatus(perfId, 'want_to_see');
+                    },
+                  ),
+                  const SizedBox(width: 12),
+                  _buildStatusButton(
+                    label: '已买',
+                    icon: Icons.check_circle_outline,
+                    color: PerformanceStatus.bought.color,
+                    isActive: status == PerformanceStatus.bought,
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await _showBoughtForm(perfId);
+                    },
+                  ),
+                  const SizedBox(width: 12),
+                  _buildStatusButton(
+                    label: '取消',
+                    icon: Icons.remove_circle_outline,
+                    color: PerformanceStatus.unmarked.color,
+                    isActive: status == PerformanceStatus.unmarked,
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await _updateStatus(perfId, 'unmarked');
+                    },
+                  ),
+                ],
+              ),
+              const Spacer(),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _editPerformance(perf);
+                      },
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      label: const Text('编辑'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _confirmDelete(perf),
+                      icon: Icon(Icons.delete_outline,
+                          size: 18, color: Colors.red[400]),
+                      label: Text('删除',
+                          style: TextStyle(color: Colors.red[400])),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red[400],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildStatusButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isActive ? color.withValues(alpha: 0.1) : Colors.grey[50],
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isActive ? color : Colors.grey[300]!,
+              width: isActive ? 1.5 : 1,
+            ),
+          ),
+          child: Column(
+            children: [
+              Icon(icon,
+                  color: isActive ? color : Colors.grey[400], size: 22),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                  color: isActive ? color : Colors.grey[500],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -261,53 +518,38 @@ class _GanttScreenState extends State<GanttScreen> {
     );
   }
 
+  // ==================== 编辑 / 删除 / 添加 ====================
+
   void _editPerformance(Map<String, dynamic> perf) async {
-    final currentDate = DateTime.parse(perf['date'] as String);
-    final newDate = await showDatePicker(
-      context: context,
-      initialDate: currentDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
-      locale: const Locale('zh', 'CN'),
-    );
-    if (newDate == null) return;
-
-    TimeOfDay? newTime;
-    if (perf['time'] != null && (perf['time'] as String).isNotEmpty) {
-      final parts = (perf['time'] as String).split(':');
-      newTime = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay(
-            hour: int.parse(parts[0]), minute: int.parse(parts[1])),
-      );
-    } else {
-      newTime = await showTimePicker(
-        context: context,
-        initialTime: const TimeOfDay(hour: 19, minute: 30),
-      );
-    }
-
     final db = DatabaseHelper.instance;
-    final performance = Performance(
-      id: perf['id'] as int,
-      showId: perf['show_id'] as int,
-      date: _fullDateFormat.format(newDate),
-      time: newTime != null
-          ? '${newTime.hour.toString().padLeft(2, '0')}:${newTime.minute.toString().padLeft(2, '0')}'
-          : perf['time'] as String?,
-      seat: perf['seat'] as String?,
-      price: perf['price'] != null ? (perf['price'] as num).toDouble() : null,
-      createdAt: perf['created_at'] as String? ??
-          DateTime.now().toIso8601String(),
-    );
-    await db.updatePerformance(performance);
-    _loadData();
+    final perfId = perf['id'] as int;
+    final existingCasts = await db.getCastMembersByPerformanceId(perfId);
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('更新成功')),
-      );
-    }
+    // ignore: use_build_context_synchronously
+    if (!mounted) return;
+
+    // ignore: use_build_context_synchronously
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return _EditPerformanceSheet(
+          perf: perf,
+          existingCasts: existingCasts,
+          onSaved: () {
+            _loadData();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('更新成功')),
+              );
+            }
+          },
+        );
+      },
+    );
   }
 
   void _confirmDelete(Map<String, dynamic> perf) {
@@ -343,6 +585,71 @@ class _GanttScreenState extends State<GanttScreen> {
     );
   }
 
+  Future<String?> _pickTimeQuick(BuildContext context,
+      {String? initial}) async {
+    const presets = ['14:00', '14:30', '19:00', '19:30'];
+    return showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('选择开场时间',
+                  style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  ...presets.map((t) => ActionChip(
+                        label: Text(t),
+                        onPressed: () => Navigator.pop(context, t),
+                      )),
+                  ActionChip(
+                    avatar: const Icon(Icons.schedule, size: 18),
+                    label: const Text('自定义'),
+                    onPressed: () async {
+                      final parts = (initial ?? '19:30').split(':');
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay(
+                          hour: int.parse(parts[0]),
+                          minute: int.parse(parts[1]),
+                        ),
+                      );
+                      if (picked != null && context.mounted) {
+                        Navigator.pop(
+                          context,
+                          '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}',
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _quickAddPerformance(int showId) async {
     final date = await showDatePicker(
       context: context,
@@ -353,20 +660,25 @@ class _GanttScreenState extends State<GanttScreen> {
     );
     if (date == null) return;
 
+    final time = await _pickTimeQuick(context);
+    if (time == null) return;
+
     final db = DatabaseHelper.instance;
     await db.createPerformance(Performance(
       showId: showId,
       date: _fullDateFormat.format(date),
-      time: '19:30',
+      time: time,
+      status: 'unmarked',
       createdAt: DateTime.now().toIso8601String(),
     ));
 
     _loadData();
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('场次添加成功')),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('场次添加成功')),
+      );
+    }
   }
 
   // ==================== BUILD ====================
@@ -417,10 +729,13 @@ class _GanttScreenState extends State<GanttScreen> {
   }
 
   Widget _buildGanttChart() {
-    final range = _getDisplayRange();
-    final totalDays = range.end.difference(range.start).inDays + 1;
-    final todayOffset = _getTodayOffset(range.start);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final cellWidth = (screenWidth - _leftPanelWidth) / 7;
+    final weekEnd = _weekStart.add(const Duration(days: 6));
+    final today = DateTime.now();
+    final isCurrentWeek = _isSameDay(_getWeekStart(today), _weekStart);
 
+    // 按剧目分组
     final showGroups = <int, List<Map<String, dynamic>>>{};
     for (final perf in _performances) {
       final showId = perf['show_id'] as int;
@@ -428,11 +743,19 @@ class _GanttScreenState extends State<GanttScreen> {
       showGroups[showId]!.add(perf);
     }
 
-    final contentHeight = showGroups.length * _rowHeight;
+    // 计算每行高度
+    final rowHeights = <int, double>{};
+    double totalHeight = 0;
+    for (final entry in showGroups.entries) {
+      final layers = _getLayers(entry.key, entry.value);
+      final h = _getRowHeight(layers);
+      rowHeights[entry.key] = h;
+      totalHeight += h;
+    }
 
     return Column(
       children: [
-        _buildToolbar(),
+        _buildToolbar(cellWidth, weekEnd),
         // 表头
         Container(
           height: _headerHeight,
@@ -447,7 +770,7 @@ class _GanttScreenState extends State<GanttScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 alignment: Alignment.centerLeft,
                 child: const Text(
-                  '剧目 / 剧场',
+                  '剧目',
                   style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
@@ -455,65 +778,57 @@ class _GanttScreenState extends State<GanttScreen> {
                 ),
               ),
               Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  controller: _hScrollController,
-                  physics: const NeverScrollableScrollPhysics(),
-                  child: SizedBox(
-                    width: totalDays * _cellWidth,
-                    child: Row(
-                      children: List.generate(totalDays, (index) {
-                        final date = range.start.add(Duration(days: index));
-                        final isToday = _isSameDay(date, DateTime.now());
-                        final isWeekend = date.weekday >= 6;
+                child: Row(
+                  children: List.generate(7, (index) {
+                    final date = _weekStart.add(Duration(days: index));
+                    final isToday = _isSameDay(date, today);
+                    final isWeekend = date.weekday >= 6;
 
-                        return Container(
-                          width: _cellWidth,
-                          height: _headerHeight,
-                          decoration: BoxDecoration(
-                            border: Border(
-                              right: BorderSide(color: Colors.grey[200]!),
+                    return Container(
+                      width: cellWidth,
+                      height: _headerHeight,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          right: BorderSide(color: Colors.grey[200]!),
+                        ),
+                        color: isToday
+                            ? const Color(0xFFFFF0F0)
+                            : (isWeekend
+                                ? const Color(0xFFF5F6F7)
+                                : null),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '${date.month}/${date.day}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: isToday
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              color: isToday
+                                  ? const Color(0xFFF54A45)
+                                  : (isWeekend
+                                      ? Colors.grey[500]
+                                      : const Color(0xFF1F2329)),
                             ),
-                            color: isToday
-                                ? const Color(0xFFFFF0F0)
-                                : (isWeekend
-                                    ? const Color(0xFFF5F6F7)
-                                    : null),
                           ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                '${date.month}/${date.day}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: isToday
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                  color: isToday
-                                      ? const Color(0xFFF54A45)
-                                      : (isWeekend
-                                          ? Colors.grey[500]
-                                          : const Color(0xFF1F2329)),
-                                ),
-                              ),
-                              Text(
-                                ['一', '二', '三', '四', '五', '六', '日']
-                                    [date.weekday - 1],
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: isToday
-                                      ? const Color(0xFFF54A45)
-                                          .withOpacity(0.7)
-                                      : Colors.grey[400],
-                                ),
-                              ),
-                            ],
+                          Text(
+                            ['一', '二', '三', '四', '五', '六', '日']
+                                [date.weekday - 1],
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: isToday
+                                  ? const Color(0xFFF54A45)
+                                      .withValues(alpha: 0.7)
+                                  : Colors.grey[400],
+                            ),
                           ),
-                        );
-                      }),
-                    ),
-                  ),
+                        ],
+                      ),
+                    );
+                  }),
                 ),
               ),
             ],
@@ -521,282 +836,365 @@ class _GanttScreenState extends State<GanttScreen> {
         ),
         // 数据区域
         Expanded(
-          child: SingleChildScrollView(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 左侧列表
-                Container(
-                  width: _leftPanelWidth,
-                  decoration: BoxDecoration(
-                    border:
-                        Border(right: BorderSide(color: Colors.grey[200]!)),
-                  ),
-                  child: Column(
-                    children: showGroups.entries.map((entry) {
-                      final showId = entry.key;
-                      final perfs = entry.value;
-                      final showName =
-                          perfs.first['show_name'] as String? ?? '未知';
-                      final showTheater =
-                          perfs.first['theater'] as String? ?? '';
-                      final color = _getShowColor(showId);
+          child: GestureDetector(
+            onHorizontalDragEnd: (details) {
+              if (details.primaryVelocity != null) {
+                if (details.primaryVelocity! > 200) {
+                  _prevWeek();
+                } else if (details.primaryVelocity! < -200) {
+                  _nextWeek();
+                }
+              }
+            },
+            child: SingleChildScrollView(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 左侧列表
+                  Container(
+                    width: _leftPanelWidth,
+                    decoration: BoxDecoration(
+                      border:
+                          Border(right: BorderSide(color: Colors.grey[200]!)),
+                    ),
+                    child: Column(
+                      children: showGroups.entries.map((entry) {
+                        final showId = entry.key;
+                        final perfs = entry.value;
+                        final showName =
+                            perfs.first['show_name'] as String? ?? '未知';
+                        final showTheater =
+                            perfs.first['theater'] as String? ?? '';
+                        final color = _getShowColor(showId);
+                        final h = rowHeights[showId] ?? _getRowHeight(1);
 
-                      return Container(
-                        height: _rowHeight,
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          border: Border(
-                              bottom:
-                                  BorderSide(color: Colors.grey[100]!)),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 3,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: color,
-                                borderRadius: BorderRadius.circular(2),
+                        return Container(
+                          height: h,
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 12),
+                          decoration: BoxDecoration(
+                            border: Border(
+                                bottom: BorderSide(
+                                    color: Colors.grey[100]!)),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 3,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                mainAxisAlignment:
-                                    MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    showName,
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500,
-                                      color: Color(0xFF1F2329),
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (showTheater.isNotEmpty)
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.center,
+                                  children: [
                                     Text(
-                                      showTheater,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.grey[500],
+                                      showName,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: Color(0xFF1F2329),
                                       ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                ],
+                                    if (showTheater.isNotEmpty)
+                                      Text(
+                                        showTheater,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey[500],
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                  ],
+                                ),
                               ),
-                            ),
-                            Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: () => _quickAddPerformance(showId),
-                                borderRadius: BorderRadius.circular(14),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(4),
-                                  child: Icon(
-                                    Icons.add_circle_outline,
-                                    size: 18,
-                                    color: Colors.grey[400],
+                              Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: () =>
+                                      _quickAddPerformance(showId),
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(4),
+                                    child: Icon(
+                                      Icons.add_circle_outline,
+                                      size: 18,
+                                      color: Colors.grey[400],
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
                   ),
-                ),
-                // 右侧时间轴
-                Expanded(
-                  child: SizedBox(
-                    height: contentHeight,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      controller: _hScrollController,
-                      child: SizedBox(
-                        width: totalDays * _cellWidth,
-                        child: Stack(
-                          children: [
-                            // 背景格子和甘特条行
-                            Column(
-                              children:
-                                  showGroups.entries.map((entry) {
-                                final showId = entry.key;
-                                final perfs = entry.value;
-                                final color = _getShowColor(showId);
+                  // 右侧时间轴
+                  Expanded(
+                    child: SizedBox(
+                      height: totalHeight,
+                      child: Stack(
+                        children: [
+                          // 背景格子和甘特条
+                          Column(
+                            children: showGroups.entries.map((entry) {
+                              final showId = entry.key;
+                              final perfs = entry.value;
+                              final layers = _getLayers(showId, perfs);
+                              final rowH = rowHeights[showId] ?? _getRowHeight(1);
 
-                                return Container(
-                                  height: _rowHeight,
-                                  decoration: BoxDecoration(
-                                    border: Border(
-                                        bottom: BorderSide(
-                                            color: Colors.grey[100]!)),
-                                  ),
-                                  child: Stack(
-                                    children: [
-                                      // 背景格子
-                                      Row(
-                                        children: List.generate(
-                                            totalDays, (index) {
-                                          final date = range.start
-                                              .add(Duration(days: index));
-                                          final isToday = _isSameDay(
-                                              date, DateTime.now());
-                                          final isWeekend =
-                                              date.weekday >= 6;
+                              // 按 dayIndex 分组
+                              final dayGroups = <int, List<Map<String, dynamic>>>{};
+                              for (final p in perfs) {
+                                final d = DateTime.parse(p['date'] as String);
+                                final idx = DateTime(d.year, d.month, d.day)
+                                    .difference(DateTime(
+                                        _weekStart.year,
+                                        _weekStart.month,
+                                        _weekStart.day))
+                                    .inDays;
+                                if (idx < 0 || idx >= 7) continue;
+                                dayGroups.putIfAbsent(idx, () => []);
+                                dayGroups[idx]!.add(p);
+                              }
 
-                                          return Container(
-                                            width: _cellWidth,
-                                            height: _rowHeight,
-                                            decoration: BoxDecoration(
-                                              border: Border(
-                                                right: BorderSide(
-                                                    color: Colors
-                                                        .grey[100]!),
-                                              ),
-                                              color: isToday
-                                                  ? const Color(
-                                                          0xFFFFF0F0)
-                                                      .withOpacity(0.4)
-                                                  : (isWeekend
-                                                      ? const Color(
-                                                              0xFFFAFAFA)
-                                                      : null),
+                              // 排序每个日期的场次
+                              for (final list in dayGroups.values) {
+                                list.sort((a, b) {
+                                  final ta = (a['time'] as String?) ?? '';
+                                  final tb = (b['time'] as String?) ?? '';
+                                  return ta.compareTo(tb);
+                                });
+                              }
+
+                              return Container(
+                                height: rowH,
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                      bottom: BorderSide(
+                                          color: Colors.grey[100]!)),
+                                ),
+                                child: Stack(
+                                  children: [
+                                    // 背景格子
+                                    Row(
+                                      children: List.generate(7, (index) {
+                                        final date = _weekStart
+                                            .add(Duration(days: index));
+                                        final isToday = _isSameDay(
+                                            date, DateTime.now());
+                                        final isWeekend =
+                                            date.weekday >= 6;
+
+                                        return Container(
+                                          width: cellWidth,
+                                          height: rowH,
+                                          decoration: BoxDecoration(
+                                            border: Border(
+                                              right: BorderSide(
+                                                  color: Colors
+                                                      .grey[100]!),
                                             ),
-                                          );
-                                        }),
-                                      ),
-                                      // 甘特条
-                                      ...perfs.map((perf) {
-                                        final perfDate = DateTime.parse(
-                                            perf['date'] as String);
-                                        final dayIndex = DateTime(
-                                                perfDate.year,
-                                                perfDate.month,
-                                                perfDate.day)
-                                            .difference(DateTime(
-                                                range.start.year,
-                                                range.start.month,
-                                                range.start.day))
-                                            .inDays;
+                                            color: isToday
+                                                ? const Color(
+                                                        0xFFFFF0F0)
+                                                    .withValues(
+                                                        alpha: 0.4)
+                                                : (isWeekend
+                                                    ? const Color(
+                                                            0xFFFAFAFA)
+                                                    : null),
+                                          ),
+                                        );
+                                      }),
+                                    ),
+                                    // 甘特条（按层渲染）
+                                    ...dayGroups.entries.expand((dayEntry) {
+                                      final dayIndex = dayEntry.key;
+                                      final dayPerfs = dayEntry.value;
+                                      final barColor = _getShowColor(showId);
 
-                                        if (dayIndex < 0 ||
-                                            dayIndex >= totalDays) {
-                                          return const SizedBox.shrink();
-                                        }
+                                      return dayPerfs
+                                          .asMap()
+                                          .entries
+                                          .map((perfEntry) {
+                                        final layer = perfEntry.key;
+                                        final perf = perfEntry.value;
+                                        final status = statusFromString(
+                                            perf['status'] as String?);
+                                        final isUnmarked = status ==
+                                            PerformanceStatus.unmarked;
+                                        final statusColor = isUnmarked
+                                            ? const Color(0xFF9CA3AF)
+                                            : (status ==
+                                                    PerformanceStatus
+                                                        .wantToSee
+                                                ? const Color(
+                                                    0xFF811FE2)
+                                                : const Color(
+                                                    0xFF34D399));
+
+                                        final top = _rowPadding +
+                                            layer *
+                                                (_layerHeight +
+                                                    _layerGap);
+                                        final perfId = perf['id'] as int;
+                                        final featuredCasts =
+                                            (_castMap[perfId] ?? [])
+                                                .where((c) =>
+                                                    c.isFeatured == true)
+                                                .take(2)
+                                                .toList();
 
                                         return Positioned(
-                                          left: dayIndex * _cellWidth +
-                                              (_cellWidth > 40 ? 6 : 2),
-                                          top: 12,
+                                          left: dayIndex * cellWidth +
+                                              2,
+                                          top: top,
                                           child: GestureDetector(
                                             onTap: () =>
                                                 _showPerformanceDetail(
                                                     perf),
                                             child: Container(
-                                              width: _cellWidth -
-                                                  (_cellWidth > 40
-                                                      ? 12
-                                                      : 4),
-                                              height: _rowHeight - 24,
+                                              width: cellWidth - 4,
+                                              height: _layerHeight,
                                               decoration: BoxDecoration(
-                                                color: color,
+                                                color: isUnmarked
+                                                    ? statusColor
+                                                        .withValues(
+                                                            alpha: 0.25)
+                                                    : statusColor,
                                                 borderRadius:
                                                     BorderRadius.circular(
                                                         4),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: color
-                                                        .withOpacity(0.3),
-                                                    blurRadius: 4,
-                                                    offset: const Offset(
-                                                        0, 1),
-                                                  ),
-                                                ],
-                                              ),
-                                              alignment: Alignment.center,
-                                              child: Text(
-                                                (perf['time']
-                                                            as String?)
-                                                        ?.substring(
-                                                            0,
-                                                            perf['time']!
-                                                                        .length >=
-                                                                    5
-                                                                ? 5
-                                                                : perf['time']!
-                                                                    .length) ??
-                                                    '',
-                                                style: const TextStyle(
-                                                  fontSize: 10,
-                                                  fontWeight:
-                                                      FontWeight.w600,
-                                                  color: Colors.white,
+                                                border: Border.all(
+                                                  color: isUnmarked
+                                                      ? statusColor
+                                                          .withValues(
+                                                              alpha: 0.4)
+                                                      : statusColor
+                                                          .withValues(
+                                                              alpha: 0.8),
+                                                  width: 0.5,
                                                 ),
-                                                overflow:
-                                                    TextOverflow.ellipsis,
+                                              ),
+                                              padding:
+                                                  const EdgeInsets.all(3),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment
+                                                        .start,
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment
+                                                        .center,
+                                                children: [
+                                                  // 时间行
+                                                  Row(
+                                                    children: [
+                                                      if (!isUnmarked)
+                                                        Icon(
+                                                          status == PerformanceStatus.wantToSee
+                                                              ? Icons.star
+                                                              : Icons.check,
+                                                          size: 9,
+                                                          color: Colors
+                                                              .white
+                                                              .withValues(
+                                                                  alpha:
+                                                                      0.9),
+                                                        ),
+                                                      if (!isUnmarked)
+                                                        const SizedBox(
+                                                            width: 2),
+                                                      Text(
+                                                        (perf['time'] as String?)
+                                                                ?.substring(
+                                                                    0,
+                                                                    5) ??
+                                                            '',
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          fontWeight:
+                                                              FontWeight
+                                                                  .w700,
+                                                          color: isUnmarked
+                                                              ? const Color(
+                                                                  0xFF4B5563)
+                                                              : Colors
+                                                                  .white,
+                                                          height: 1.1,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  // 卡司行
+                                                  if (featuredCasts
+                                                      .isNotEmpty)
+                                                    ...featuredCasts
+                                                        .map((c) {
+                                                      return Text(
+                                                        '${c.role}:${c.actorName}',
+                                                        style:
+                                                            TextStyle(
+                                                          fontSize: 10,
+                                                          color: isUnmarked
+                                                              ? const Color(
+                                                                  0xFF6B7280)
+                                                              : Colors
+                                                                  .white
+                                                                  .withValues(
+                                                                      alpha:
+                                                                          0.9),
+                                                          height: 1.2,
+                                                        ),
+                                                        maxLines: 1,
+                                                        overflow:
+                                                            TextOverflow
+                                                                .ellipsis,
+                                                      );
+                                                    }),
+                                                ],
                                               ),
                                             ),
                                           ),
                                         );
-                                      }).toList(),
-                                    ],
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                            // 今天线
-                            if (todayOffset >= 0 &&
-                                todayOffset <=
-                                    totalDays * _cellWidth)
-                              Positioned(
-                                left: todayOffset,
-                                top: 0,
-                                bottom: 0,
-                                child: Column(
-                                  children: [
-                                    Container(
-                                      padding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 4,
-                                              vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF54A45),
-                                        borderRadius:
-                                            BorderRadius.circular(2),
-                                      ),
-                                      child: const Text(
-                                        '今天',
-                                        style: TextStyle(
-                                          fontSize: 9,
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Container(
-                                        width: 2,
-                                        color: const Color(0xFFF54A45),
-                                      ),
-                                    ),
+                                      });
+                                    }).toList(),
                                   ],
                                 ),
+                              );
+                            }).toList(),
+                          ),
+                          // 今天线
+                          if (isCurrentWeek)
+                            Positioned(
+                              left: (today.weekday - 1) * cellWidth +
+                                  cellWidth / 2 -
+                                  1,
+                              top: 0,
+                              bottom: 0,
+                              child: Container(
+                                width: 2,
+                                color: const Color(0xFFF54A45)
+                                    .withValues(alpha: 0.6),
                               ),
-                          ],
-                        ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -804,7 +1202,7 @@ class _GanttScreenState extends State<GanttScreen> {
     );
   }
 
-  Widget _buildToolbar() {
+  Widget _buildToolbar(double cellWidth, DateTime weekEnd) {
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -814,34 +1212,33 @@ class _GanttScreenState extends State<GanttScreen> {
       ),
       child: Row(
         children: [
+          IconButton(
+            onPressed: _prevWeek,
+            icon: const Icon(Icons.chevron_left),
+            tooltip: '上一周',
+          ),
           OutlinedButton.icon(
-            onPressed: _scrollToToday,
+            onPressed: _goToToday,
             icon: const Icon(Icons.today, size: 16),
             label: const Text('今天'),
             style: OutlinedButton.styleFrom(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               textStyle: const TextStyle(fontSize: 13),
             ),
           ),
-          const SizedBox(width: 8),
-          SegmentedButton<ViewMode>(
-            segments: const [
-              ButtonSegment(value: ViewMode.day, label: Text('日')),
-              ButtonSegment(value: ViewMode.week, label: Text('周')),
-              ButtonSegment(value: ViewMode.month, label: Text('月')),
-            ],
-            selected: {_viewMode},
-            onSelectionChanged: (set) {
-              setState(() => _viewMode = set.first);
-            },
-            style: ButtonStyle(
-              padding: WidgetStateProperty.all(
-                const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              textStyle: WidgetStateProperty.all(
-                const TextStyle(fontSize: 12),
-              ),
+          IconButton(
+            onPressed: _nextWeek,
+            icon: const Icon(Icons.chevron_right),
+            tooltip: '下一周',
+          ),
+          const SizedBox(width: 12),
+          Text(
+            '${_weekStart.month}/${_weekStart.day} - ${weekEnd.month}/${weekEnd.day}',
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF1F2329),
             ),
           ),
           const Spacer(),
@@ -858,6 +1255,396 @@ class _GanttScreenState extends State<GanttScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ==================== 编辑场次 Sheet ====================
+
+class _EditPerformanceSheet extends StatefulWidget {
+  final Map<String, dynamic> perf;
+  final List<CastMember> existingCasts;
+  final VoidCallback onSaved;
+
+  const _EditPerformanceSheet({
+    required this.perf,
+    required this.existingCasts,
+    required this.onSaved,
+  });
+
+  @override
+  State<_EditPerformanceSheet> createState() => _EditPerformanceSheetState();
+}
+
+class _EditCastRow {
+  TextEditingController roleController;
+  TextEditingController actorController;
+  bool isFeatured;
+
+  _EditCastRow({String? role, String? actor, bool? featured})
+      : roleController = TextEditingController(text: role ?? ''),
+        actorController = TextEditingController(text: actor ?? ''),
+        isFeatured = featured ?? false;
+
+  void dispose() {
+    roleController.dispose();
+    actorController.dispose();
+  }
+}
+
+class _EditPerformanceSheetState extends State<_EditPerformanceSheet> {
+  late String _date;
+  late String _time;
+  final List<_EditCastRow> _castRows = [];
+  bool _isSaving = false;
+  final DateFormat _fullDateFormat = DateFormat('yyyy-MM-dd');
+
+  @override
+  void initState() {
+    super.initState();
+    _date = widget.perf['date'] as String;
+    _time = widget.perf['time'] as String? ?? '19:30';
+    for (final c in widget.existingCasts) {
+      _castRows.add(_EditCastRow(
+        role: c.role,
+        actor: c.actorName,
+        featured: c.isFeatured,
+      ));
+    }
+    if (_castRows.isEmpty) {
+      _castRows.add(_EditCastRow());
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final r in _castRows) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.parse(_date),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      locale: const Locale('zh', 'CN'),
+    );
+    if (picked != null) {
+      setState(() => _date = _fullDateFormat.format(picked));
+    }
+  }
+
+  Future<void> _pickTime() async {
+    const presets = ['14:00', '14:30', '19:00', '19:30'];
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('选择开场时间',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  ...presets.map((t) => ActionChip(
+                        label: Text(t),
+                        onPressed: () => Navigator.pop(context, t),
+                      )),
+                  ActionChip(
+                    avatar: const Icon(Icons.schedule, size: 18),
+                    label: const Text('自定义'),
+                    onPressed: () async {
+                      final parts = _time.split(':');
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay(
+                          hour: int.parse(parts[0]),
+                          minute: int.parse(parts[1]),
+                        ),
+                      );
+                      if (picked != null && context.mounted) {
+                        Navigator.pop(context,
+                          '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}',
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (result != null) {
+      setState(() => _time = result);
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _isSaving = true);
+    try {
+      final db = DatabaseHelper.instance;
+      final perfId = widget.perf['id'] as int;
+
+      // 更新场次
+      final performance = await db.getPerformanceById(perfId);
+      if (performance != null) {
+        await db.updatePerformance(performance.copyWith(
+          date: _date,
+          time: _time,
+        ));
+      }
+
+      // 删除旧卡司
+      await db.deleteCastMembersByPerformanceId(perfId);
+
+      // 创建新卡司
+      for (final row in _castRows) {
+        final role = row.roleController.text.trim();
+        final actor = row.actorController.text.trim();
+        if (role.isNotEmpty && actor.isNotEmpty) {
+          await db.createCastMember(CastMember(
+            performanceId: perfId,
+            role: role,
+            actorName: actor,
+            isFeatured: row.isFeatured,
+            createdAt: DateTime.now().toIso8601String(),
+          ));
+          try {
+            await db.createActor(Actor(
+              name: actor,
+              createdAt: DateTime.now().toIso8601String(),
+            ));
+          } catch (_) {}
+        }
+      }
+
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onSaved();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('保存失败: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.7,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text('编辑场次',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+
+              // 日期 + 时间
+              Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: _pickDate,
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: '日期',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.calendar_today),
+                        ),
+                        child: Text(_date, style: const TextStyle(fontSize: 15)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: InkWell(
+                      onTap: _pickTime,
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: '时间',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.access_time),
+                        ),
+                        child: Text(_time, style: const TextStyle(fontSize: 15)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // 卡司表格
+              Row(
+                children: [
+                  Text('卡司',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          )),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () => setState(() => _castRows.add(_EditCastRow())),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('添加角色'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  itemCount: _castRows.length,
+                  itemBuilder: (context, index) {
+                    final row = _castRows[index];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: TextField(
+                                controller: row.roleController,
+                                decoration: const InputDecoration(
+                                  labelText: '角色',
+                                  isDense: true,
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 3,
+                              child: TextField(
+                                controller: row.actorController,
+                                decoration: const InputDecoration(
+                                  labelText: '演员',
+                                  isDense: true,
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Checkbox(
+                                  value: row.isFeatured,
+                                  onChanged: (v) => setState(
+                                      () => row.isFeatured = v ?? false),
+                                ),
+                                GestureDetector(
+                                  onTap: () => setState(
+                                      () => row.isFeatured = !row.isFeatured),
+                                  child: const Text('★',
+                                      style: TextStyle(
+                                          fontSize: 14,
+                                          color: Color(0xFF811FE2))),
+                                ),
+                              ],
+                            ),
+                            if (_castRows.length > 1)
+                              IconButton(
+                                icon: Icon(Icons.delete_outline,
+                                    size: 18, color: Colors.red[300]),
+                                onPressed: () => setState(() {
+                                  row.dispose();
+                                  _castRows.removeAt(index);
+                                }),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('取消'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _isSaving ? null : _save,
+                      child: _isSaving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('保存'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
 import '../models/show.dart';
+import '../models/performance.dart';
 import '../models/actor.dart';
 import 'add_show_screen.dart';
 
@@ -11,31 +13,48 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _ProfileScreenState extends State<ProfileScreen> {
   List<Show> _shows = [];
+  List<Performance> _performances = [];
   List<Actor> _actors = [];
   bool _isLoading = true;
-  int _totalPerformances = 0;
+
+  int get _wantToSeeCount =>
+      _performances.where((p) => p.status == 'want_to_see').length;
+
+  int get _boughtCount =>
+      _performances.where((p) => p.status == 'bought').length;
+
+  int get _upcomingCount {
+    final now = DateTime.now();
+    final sevenDaysLater = now.add(const Duration(days: 7));
+    return _performances.where((p) {
+      if (p.status != 'bought') return false;
+      try {
+        final date = DateTime.parse(p.date);
+        return date.isAfter(now) && date.isBefore(sevenDaysLater);
+      } catch (_) {
+        return false;
+      }
+    }).length;
+  }
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     _loadData();
   }
 
   Future<void> _loadData() async {
     final db = DatabaseHelper.instance;
     final shows = await db.getAllShows();
-    final actors = await db.getAllActors();
     final performances = await db.getAllPerformances();
+    final actors = await db.getAllActors();
 
     setState(() {
       _shows = shows;
+      _performances = performances;
       _actors = actors;
-      _totalPerformances = performances.length;
       _isLoading = false;
     });
   }
@@ -63,7 +82,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
 
     if (confirmed == true) {
-      // Delete related performances first (cascade will handle cast)
       final db = DatabaseHelper.instance;
       final perfs = await db.getPerformancesByShowId(showId);
       for (final p in perfs) {
@@ -107,112 +125,54 @@ class _ProfileScreenState extends State<ProfileScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('个人主页'),
+        title: const Text('我的'),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : CustomScrollView(
               slivers: [
-                // Profile header
-                SliverToBoxAdapter(
-                  child: _buildProfileHeader(),
-                ),
-
-                // Stats
+                // 统计卡片
                 SliverToBoxAdapter(
                   child: _buildStatsSection(),
                 ),
-
-                // Tab bar
+                // 即将演出
+                if (_upcomingCount > 0)
+                  SliverToBoxAdapter(
+                    child: _buildUpcomingSection(),
+                  ),
+                // 管理入口
                 SliverToBoxAdapter(
-                  child: TabBar(
-                    controller: _tabController,
-                    tabs: const [
-                      Tab(text: '剧目'),
-                      Tab(text: '演员'),
-                    ],
-                  ),
-                ),
-
-                // Tab content
-                SliverFillRemaining(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildShowsList(),
-                      _buildActorsList(),
-                    ],
-                  ),
+                  child: _buildManagementSection(),
                 ),
               ],
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const AddShowScreen()),
-          ).then((_) => _loadData());
-        },
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-
-  Widget _buildProfileHeader() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          CircleAvatar(
-            radius: 48,
-            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-            child: Icon(
-              Icons.person,
-              size: 48,
-              color: Theme.of(context).colorScheme.onPrimaryContainer,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            '剧迷',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '已记录 ${_shows.length} 部剧，共 $_totalPerformances 场演出',
-            style: TextStyle(color: Colors.grey[600]),
-          ),
-        ],
-      ),
     );
   }
 
   Widget _buildStatsSection() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Row(
         children: [
           _buildStatCard(
-            icon: Icons.theaters,
-            label: '剧目',
-            value: '${_shows.length}',
-            color: Colors.blue,
+            label: '想看',
+            value: '$_wantToSeeCount',
+            color: const Color(0xFF811FE2),
+            icon: Icons.star_border,
           ),
           const SizedBox(width: 12),
           _buildStatCard(
-            icon: Icons.event_available,
-            label: '场次',
-            value: '$_totalPerformances',
-            color: Colors.green,
+            label: '已买',
+            value: '$_boughtCount',
+            color: const Color(0xFF34D399),
+            icon: Icons.check_circle_outline,
           ),
           const SizedBox(width: 12),
           _buildStatCard(
-            icon: Icons.people,
-            label: '演员',
-            value: '${_actors.length}',
-            color: Colors.orange,
+            label: '即将演出',
+            value: '$_upcomingCount',
+            color: const Color(0xFFF54A45),
+            icon: Icons.access_time,
           ),
         ],
       ),
@@ -220,168 +180,377 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildStatCard({
-    required IconData icon,
     required String label,
     required String value,
-    required MaterialColor color,
+    required Color color,
+    required IconData icon,
   }) {
     return Expanded(
-      child: Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: color.withOpacity(0.2)),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
         ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 28),
-              const SizedBox(height: 8),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: color[700],
-                ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: color,
               ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: color.withValues(alpha: 0.8),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildShowsList() {
-    if (_shows.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.theaters_outlined, size: 64, color: Colors.grey[300]),
-            const SizedBox(height: 16),
-            Text('暂无剧目', style: TextStyle(color: Colors.grey[400])),
-          ],
-        ),
-      );
-    }
+  Widget _buildUpcomingSection() {
+    final now = DateTime.now();
+    final upcoming = _performances.where((p) {
+      if (p.status != 'bought') return false;
+      try {
+        final date = DateTime.parse(p.date);
+        return date.isAfter(now) &&
+            date.isBefore(now.add(const Duration(days: 7)));
+      } catch (_) {
+        return false;
+      }
+    }).toList();
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: _shows.length,
-      itemBuilder: (context, index) {
-        final show = _shows[index];
-        return Dismissible(
-          key: Key('show_${show.id}'),
-          direction: DismissDirection.endToStart,
-          background: Container(
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: 20),
-            decoration: BoxDecoration(
-              color: Colors.red[100],
-              borderRadius: BorderRadius.circular(12),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Text(
+            '未来7天',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
             ),
-            child: Icon(Icons.delete, color: Colors.red[700]),
           ),
-          onDismissed: (_) => _deleteShow(show.id!),
-          child: Card(
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Theme.of(context)
-                    .colorScheme
-                    .primaryContainer,
-                child: Text(
-                  show.name.substring(0, 1),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onPrimaryContainer,
-                  ),
+        ),
+        ...upcoming.map((perf) {
+          final show = _shows.firstWhere(
+            (s) => s.id == perf.showId,
+            orElse: () => Show(name: '未知'),
+          );
+          final date = DateTime.parse(perf.date);
+          final weekday = ['一', '二', '三', '四', '五', '六', '日'];
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF34D399).withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: const Color(0xFF34D399).withValues(alpha: 0.2),
                 ),
               ),
-              title: Text(
-                show.name,
-                style: const TextStyle(fontWeight: FontWeight.w600),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF34D399).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '${date.month}/${date.day}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF34D399),
+                          ),
+                        ),
+                        Text(
+                          '周${weekday[date.weekday - 1]}',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: const Color(0xFF34D399).withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          show.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${perf.time?.substring(0, 5) ?? ''}  ${show.theater ?? ''}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (perf.seat != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF34D399).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        perf.seat!,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF34D399),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              subtitle: show.theater != null
-                  ? Text(show.theater!, style: TextStyle(color: Colors.grey[600]))
-                  : null,
-              trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
             ),
-          ),
-        );
-      },
+          );
+        }),
+      ],
     );
   }
 
-  Widget _buildActorsList() {
-    if (_actors.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.people_outline, size: 64, color: Colors.grey[300]),
-            const SizedBox(height: 16),
-            Text('暂无演员', style: TextStyle(color: Colors.grey[400])),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: _actors.length,
-      itemBuilder: (context, index) {
-        final actor = _actors[index];
-        return Dismissible(
-          key: Key('actor_${actor.id}'),
-          direction: DismissDirection.endToStart,
-          background: Container(
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: 20),
-            decoration: BoxDecoration(
-              color: Colors.red[100],
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(Icons.delete, color: Colors.red[700]),
-          ),
-          onDismissed: (_) => _deleteActor(actor.id!),
-          child: Card(
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.orange[100],
-                child: Text(
-                  actor.name.substring(0, 1),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.orange[800],
-                  ),
-                ),
-              ),
-              title: Text(actor.name),
-              subtitle: actor.note != null
-                  ? Text(actor.note!, style: TextStyle(color: Colors.grey[600]))
-                  : null,
+  Widget _buildManagementSection() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '管理',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
             ),
           ),
-        );
-      },
+          const SizedBox(height: 12),
+          _buildManageCard(
+            icon: Icons.theaters,
+            title: '我的剧目',
+            subtitle: '${_shows.length} 部',
+            onTap: () => _showShowsSheet(),
+          ),
+          const SizedBox(height: 8),
+          _buildManageCard(
+            icon: Icons.people,
+            title: '演员名单',
+            subtitle: '${_actors.length} 人',
+            onTap: () => _showActorsSheet(),
+          ),
+        ],
+      ),
     );
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+  Widget _buildManageCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: Colors.grey[200]!),
+      ),
+      child: ListTile(
+        leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
+        onTap: onTap,
+      ),
+    );
+  }
+
+  void _showShowsSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) {
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const Text(
+                      '我的剧目',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const AddShowScreen(),
+                          ),
+                        ).then((_) => _loadData());
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _shows.isEmpty
+                    ? Center(
+                        child: Text('暂无剧目',
+                            style: TextStyle(color: Colors.grey[400])),
+                      )
+                    : ListView.builder(
+                        controller: scrollController,
+                        itemCount: _shows.length,
+                        itemBuilder: (context, index) {
+                          final show = _shows[index];
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer,
+                              child: Text(
+                                show.name.substring(0, 1),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onPrimaryContainer,
+                                ),
+                              ),
+                            ),
+                            title: Text(show.name),
+                            subtitle: show.theater != null
+                                ? Text(show.theater!)
+                                : null,
+                            trailing: IconButton(
+                              icon: Icon(Icons.delete_outline,
+                                  color: Colors.red[300]),
+                              onPressed: () => _deleteShow(show.id!),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showActorsSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) {
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: const Text(
+                  '演员名单',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _actors.isEmpty
+                    ? Center(
+                        child: Text('暂无演员',
+                            style: TextStyle(color: Colors.grey[400])),
+                      )
+                    : ListView.builder(
+                        controller: scrollController,
+                        itemCount: _actors.length,
+                        itemBuilder: (context, index) {
+                          final actor = _actors[index];
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.orange[100],
+                              child: Text(
+                                actor.name.substring(0, 1),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange[800],
+                                ),
+                              ),
+                            ),
+                            title: Text(actor.name),
+                            subtitle: actor.note != null
+                                ? Text(actor.note!)
+                                : null,
+                            trailing: IconButton(
+                              icon: Icon(Icons.delete_outline,
+                                  color: Colors.red[300]),
+                              onPressed: () => _deleteActor(actor.id!),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 }
