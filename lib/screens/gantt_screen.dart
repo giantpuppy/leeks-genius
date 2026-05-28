@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
 import '../models/performance.dart';
 import '../models/cast_member.dart';
+import '../utils/page_transitions.dart';
 import '../models/actor.dart';
 import 'add_show_screen.dart';
 
@@ -70,11 +71,11 @@ class _GanttScreenState extends State<GanttScreen> {
 
   final DateFormat _fullDateFormat = DateFormat('yyyy-MM-dd');
 
-  static const double _layerHeight = 64;
-  static const double _layerGap = 3;
-  static const double _rowPadding = 8;
+  static const double _layerGap = 8;
+  static const double _rowPadding = 14;
   static const double _headerHeight = 48;
-  static const double _leftPanelWidth = 90;
+  static const double _leftPanelWidth = 120;
+  static const double _minBlockHeight = 64;
 
   static DateTime _getWeekStart(DateTime date) {
     final d = DateTime(date.year, date.month, date.day);
@@ -136,11 +137,25 @@ class _GanttScreenState extends State<GanttScreen> {
     return dayCounts.values.reduce((a, b) => a > b ? a : b);
   }
 
-  double _getRowHeight(int layers) {
-    return _rowPadding +
-        layers * _layerHeight +
-        (layers - 1) * _layerGap +
-        _rowPadding;
+  /// 计算单个演出区块的高度（根据卡司数量自适应）
+  double _calculateBlockHeight(List<CastMember> casts) {
+    const timeRowHeight = 18.0;
+    const castLineHeight = 14.0;
+    const verticalPadding = 8.0;
+    final featuredCasts = casts.where((c) => c.isFeatured == true).toList();
+    final castHeight = featuredCasts.length * castLineHeight;
+    final h = verticalPadding + timeRowHeight + castHeight + verticalPadding;
+    return h < _minBlockHeight ? _minBlockHeight : h;
+  }
+
+  /// 计算行高（基于各层的最大区块高度）
+  double _getRowHeight(List<double> layerHeights) {
+    var total = _rowPadding + _rowPadding;
+    for (var i = 0; i < layerHeights.length; i++) {
+      total += layerHeights[i];
+      if (i < layerHeights.length - 1) total += _layerGap;
+    }
+    return total;
   }
 
   Color _getShowColor(int showId) {
@@ -170,6 +185,7 @@ class _GanttScreenState extends State<GanttScreen> {
   Future<void> _showBoughtForm(int perfId) async {
     final seatController = TextEditingController();
     final priceController = TextEditingController();
+    final actualPriceController = TextEditingController();
 
     final result = await showDialog<bool>(
       context: context,
@@ -182,7 +198,7 @@ class _GanttScreenState extends State<GanttScreen> {
               controller: seatController,
               decoration: const InputDecoration(
                 labelText: '座位',
-                hintText: '如: 1排1座',
+                hintText: '如: 1楼-3排-5号',
                 prefixIcon: Icon(Icons.event_seat_outlined),
               ),
             ),
@@ -191,9 +207,19 @@ class _GanttScreenState extends State<GanttScreen> {
               controller: priceController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: '票价',
-                hintText: '如: 180',
-                prefixIcon: Icon(Icons.attach_money),
+                labelText: '票面价格',
+                hintText: '如: 580',
+                prefixIcon: Icon(Icons.confirmation_number_outlined),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: actualPriceController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: '实付价格',
+                hintText: '如: 480',
+                prefixIcon: Icon(Icons.payments_outlined),
               ),
             ),
           ],
@@ -221,6 +247,9 @@ class _GanttScreenState extends State<GanttScreen> {
           price: priceController.text.isNotEmpty
               ? double.tryParse(priceController.text)
               : null,
+          actualPrice: actualPriceController.text.isNotEmpty
+              ? double.tryParse(actualPriceController.text)
+              : null,
         ));
         _loadData();
       }
@@ -230,6 +259,7 @@ class _GanttScreenState extends State<GanttScreen> {
 
     seatController.dispose();
     priceController.dispose();
+    actualPriceController.dispose();
   }
 
   // ==================== 详情面板 ====================
@@ -253,6 +283,7 @@ class _GanttScreenState extends State<GanttScreen> {
     final time = perf['time'] as String? ?? '';
     final seat = perf['seat'] as String? ?? '';
     final price = perf['price'] != null ? '¥${perf['price']}' : '';
+    final actualPrice = perf['actual_price'] != null ? '¥${perf['actual_price']}' : '';
     final perfId = perf['id'] as int;
     final casts = _castMap[perfId] ?? [];
 
@@ -272,7 +303,7 @@ class _GanttScreenState extends State<GanttScreen> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: const Color(0xFF4D4D4D),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -313,10 +344,10 @@ class _GanttScreenState extends State<GanttScreen> {
                   child: Row(
                     children: [
                       Icon(Icons.location_on_outlined,
-                          size: 16, color: Colors.grey[500]),
+                          size: 18, color: const Color(0xFF8A8F98)),
                       const SizedBox(width: 4),
                       Text(theater,
-                          style: TextStyle(color: Colors.grey[600])),
+                          style: TextStyle(color: const Color(0xFFB3B3B3))),
                     ],
                   ),
                 ),
@@ -324,10 +355,12 @@ class _GanttScreenState extends State<GanttScreen> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: const Color(0xFF181818),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Row(
+                child: Wrap(
+                  spacing: 16,
+                  runSpacing: 12,
                   children: [
                     _buildInfoItem(Icons.calendar_today, '日期', date),
                     _buildInfoItem(Icons.access_time, '时间',
@@ -335,7 +368,9 @@ class _GanttScreenState extends State<GanttScreen> {
                     if (seat.isNotEmpty)
                       _buildInfoItem(Icons.event_seat, '座位', seat),
                     if (price.isNotEmpty)
-                      _buildInfoItem(Icons.attach_money, '票价', price),
+                      _buildInfoItem(Icons.confirmation_number_outlined, '票面', price),
+                    if (actualPrice.isNotEmpty)
+                      _buildInfoItem(Icons.payments_outlined, '实付', actualPrice),
                   ],
                 ),
               ),
@@ -345,7 +380,7 @@ class _GanttScreenState extends State<GanttScreen> {
                     style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Colors.grey[700])),
+                        color: Color(0xFFB3B3B3))),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
@@ -358,7 +393,7 @@ class _GanttScreenState extends State<GanttScreen> {
                       decoration: BoxDecoration(
                         color: isFeatured
                             ? const Color(0xFF811FE2).withValues(alpha: 0.08)
-                            : Colors.grey[100],
+                            : const Color(0xFF252525),
                         borderRadius: BorderRadius.circular(8),
                         border: isFeatured
                             ? Border.all(
@@ -372,7 +407,7 @@ class _GanttScreenState extends State<GanttScreen> {
                           fontSize: 13,
                           color: isFeatured
                               ? const Color(0xFF811FE2)
-                              : Colors.grey[700],
+                              : const Color(0xFFB3B3B3),
                           fontWeight:
                               isFeatured ? FontWeight.w600 : FontWeight.normal,
                         ),
@@ -386,7 +421,7 @@ class _GanttScreenState extends State<GanttScreen> {
                   style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: Colors.grey[700])),
+                      color: Color(0xFFB3B3B3))),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -433,7 +468,7 @@ class _GanttScreenState extends State<GanttScreen> {
                         Navigator.pop(context);
                         _editPerformance(perf);
                       },
-                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      icon: const Icon(Icons.edit_outlined, size: 20),
                       label: const Text('编辑'),
                     ),
                   ),
@@ -442,7 +477,7 @@ class _GanttScreenState extends State<GanttScreen> {
                     child: OutlinedButton.icon(
                       onPressed: () => _confirmDelete(perf),
                       icon: Icon(Icons.delete_outline,
-                          size: 18, color: Colors.red[400]),
+                          size: 20, color: Colors.red[400]),
                       label: Text('删除',
                           style: TextStyle(color: Colors.red[400])),
                       style: OutlinedButton.styleFrom(
@@ -469,27 +504,28 @@ class _GanttScreenState extends State<GanttScreen> {
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: isActive ? color.withValues(alpha: 0.1) : Colors.grey[50],
-            borderRadius: BorderRadius.circular(10),
+            color: isActive ? color.withValues(alpha: 0.15) : const Color(0xFF1F1F1F),
+            borderRadius: BorderRadius.circular(500),
             border: Border.all(
-              color: isActive ? color : Colors.grey[300]!,
+              color: isActive ? color : const Color(0xFF4D4D4D),
               width: isActive ? 1.5 : 1,
             ),
           ),
           child: Column(
             children: [
               Icon(icon,
-                  color: isActive ? color : Colors.grey[400], size: 22),
+                  color: isActive ? color : const Color(0xFF8A8F98), size: 22),
               const SizedBox(height: 4),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                  color: isActive ? color : Colors.grey[500],
+                  color: isActive ? color : const Color(0xFF8A8F98),
                 ),
               ),
             ],
@@ -503,10 +539,10 @@ class _GanttScreenState extends State<GanttScreen> {
     return Expanded(
       child: Column(
         children: [
-          Icon(icon, size: 20, color: Colors.grey[400]),
+          Icon(icon, size: 20, color: const Color(0xFF8A8F98)),
           const SizedBox(height: 4),
           Text(label,
-              style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+              style: TextStyle(fontSize: 11, color: const Color(0xFF8A8F98))),
           const SizedBox(height: 2),
           Text(
             value,
@@ -603,7 +639,7 @@ class _GanttScreenState extends State<GanttScreen> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: const Color(0xFF4D4D4D),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -687,8 +723,8 @@ class _GanttScreenState extends State<GanttScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('排期甘特图'),
         elevation: 0,
+        foregroundColor: Colors.white,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -703,21 +739,20 @@ class _GanttScreenState extends State<GanttScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.view_timeline_outlined,
-              size: 80, color: Colors.grey[300]),
+          const _BreathingIcon(icon: Icons.view_timeline_outlined),
           const SizedBox(height: 16),
-          Text('暂无排期',
-              style: TextStyle(fontSize: 18, color: Colors.grey[400])),
+          const Text('暂无排期',
+              style: TextStyle(fontSize: 18, color: Color(0xFF8A8F98))),
           const SizedBox(height: 8),
-          Text('点击右下角添加剧目',
-              style: TextStyle(fontSize: 14, color: Colors.grey[350])),
+          const Text('点击右下角添加剧目',
+              style: TextStyle(fontSize: 14, color: Color(0xFF7C7C7C))),
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                    builder: (context) => const AddShowScreen()),
+                SlideFadeRoute(
+                    page: const AddShowScreen()),
               ).then((_) => _loadData());
             },
             icon: const Icon(Icons.add),
@@ -735,21 +770,51 @@ class _GanttScreenState extends State<GanttScreen> {
     final today = DateTime.now();
     final isCurrentWeek = _isSameDay(_getWeekStart(today), _weekStart);
 
-    // 按剧目分组
+    // 按剧目分组（只包含当前周内的演出）
     final showGroups = <int, List<Map<String, dynamic>>>{};
     for (final perf in _performances) {
       final showId = perf['show_id'] as int;
+      final date = DateTime.parse(perf['date'] as String);
+      final dayIdx = DateTime(date.year, date.month, date.day)
+          .difference(DateTime(_weekStart.year, _weekStart.month, _weekStart.day))
+          .inDays;
+      // 只保留当前周范围内的演出
+      if (dayIdx < 0 || dayIdx >= 7) continue;
       showGroups.putIfAbsent(showId, () => []);
       showGroups[showId]!.add(perf);
     }
 
-    // 计算每行高度
+    // 计算每行各层的最大区块高度
+    final layerHeightsMap = <int, List<double>>{};
     final rowHeights = <int, double>{};
     double totalHeight = 0;
     for (final entry in showGroups.entries) {
-      final layers = _getLayers(entry.key, entry.value);
-      final h = _getRowHeight(layers);
-      rowHeights[entry.key] = h;
+      final showId = entry.key;
+      final perfs = entry.value;
+      final layers = _getLayers(showId, perfs);
+      // 计算每层最大高度
+      final layerHeights = List<double>.filled(layers, _minBlockHeight);
+      // 按天分组，计算每天的各层高度
+      for (final p in perfs) {
+        final d = DateTime.parse(p['date'] as String);
+        final idx = DateTime(d.year, d.month, d.day)
+            .difference(DateTime(_weekStart.year, _weekStart.month, _weekStart.day))
+            .inDays;
+        if (idx < 0 || idx >= 7) continue;
+        // 按时间排序后确定层索引
+        final dayPerfs = perfs.where((pp) => pp['date'] == p['date']).toList()
+          ..sort((a, b) => ((a['time'] as String?) ?? '').compareTo((b['time'] as String?) ?? ''));
+        final layerIdx = dayPerfs.indexWhere((pp) => pp['id'] == p['id']);
+        if (layerIdx >= 0 && layerIdx < layers) {
+          final perfId = p['id'] as int;
+          final casts = (_castMap[perfId] ?? []).where((c) => c.isFeatured == true).toList();
+          final h = _calculateBlockHeight(casts);
+          if (h > layerHeights[layerIdx]) layerHeights[layerIdx] = h;
+        }
+      }
+      layerHeightsMap[showId] = layerHeights;
+      final h = _getRowHeight(layerHeights);
+      rowHeights[showId] = h;
       totalHeight += h;
     }
 
@@ -759,9 +824,9 @@ class _GanttScreenState extends State<GanttScreen> {
         // 表头
         Container(
           height: _headerHeight,
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-            color: const Color(0xFFF5F6F7),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: Color(0xFF2A2A2A))),
+            color: Color(0xFF181818),
           ),
           child: Row(
             children: [
@@ -774,7 +839,7 @@ class _GanttScreenState extends State<GanttScreen> {
                   style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
-                      color: Color(0xFF1F2329)),
+                      color: Colors.white),
                 ),
               ),
               Expanded(
@@ -788,13 +853,13 @@ class _GanttScreenState extends State<GanttScreen> {
                       width: cellWidth,
                       height: _headerHeight,
                       decoration: BoxDecoration(
-                        border: Border(
-                          right: BorderSide(color: Colors.grey[200]!),
+                        border: const Border(
+                          right: BorderSide(color: Color(0xFF2A2A2A)),
                         ),
                         color: isToday
-                            ? const Color(0xFFFFF0F0)
+                            ? const Color(0xFFF54A45).withValues(alpha: 0.08)
                             : (isWeekend
-                                ? const Color(0xFFF5F6F7)
+                                ? const Color(0xFF1A1A1A)
                                 : null),
                       ),
                       child: Column(
@@ -810,8 +875,8 @@ class _GanttScreenState extends State<GanttScreen> {
                               color: isToday
                                   ? const Color(0xFFF54A45)
                                   : (isWeekend
-                                      ? Colors.grey[500]
-                                      : const Color(0xFF1F2329)),
+                                      ? const Color(0xFF8A8F98)
+                                      : Colors.white),
                             ),
                           ),
                           Text(
@@ -822,7 +887,7 @@ class _GanttScreenState extends State<GanttScreen> {
                               color: isToday
                                   ? const Color(0xFFF54A45)
                                       .withValues(alpha: 0.7)
-                                  : Colors.grey[400],
+                                  : const Color(0xFF8A8F98),
                             ),
                           ),
                         ],
@@ -853,9 +918,9 @@ class _GanttScreenState extends State<GanttScreen> {
                   // 左侧列表
                   Container(
                     width: _leftPanelWidth,
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                       border:
-                          Border(right: BorderSide(color: Colors.grey[200]!)),
+                          Border(right: BorderSide(color: Color(0xFF2A2A2A))),
                     ),
                     child: Column(
                       children: showGroups.entries.map((entry) {
@@ -866,7 +931,7 @@ class _GanttScreenState extends State<GanttScreen> {
                         final showTheater =
                             perfs.first['theater'] as String? ?? '';
                         final color = _getShowColor(showId);
-                        final h = rowHeights[showId] ?? _getRowHeight(1);
+                        final h = rowHeights[showId] ?? _getRowHeight([_minBlockHeight]);
 
                         return Container(
                           height: h,
@@ -875,7 +940,7 @@ class _GanttScreenState extends State<GanttScreen> {
                           decoration: BoxDecoration(
                             border: Border(
                                 bottom: BorderSide(
-                                    color: Colors.grey[100]!)),
+                                    color: const Color(0xFF1F1F1F))),
                           ),
                           child: Row(
                             children: [
@@ -889,48 +954,35 @@ class _GanttScreenState extends State<GanttScreen> {
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      showName,
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w500,
-                                        color: Color(0xFF1F2329),
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    if (showTheater.isNotEmpty)
+                                child: GestureDetector(
+                                  onTap: () => _showShowDetail(showId, showName),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.center,
+                                    children: [
                                       Text(
-                                        showTheater,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.grey[500],
+                                        showName,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.white,
                                         ),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
-                                  ],
-                                ),
-                              ),
-                              Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  onTap: () =>
-                                      _quickAddPerformance(showId),
-                                  borderRadius: BorderRadius.circular(14),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(4),
-                                    child: Icon(
-                                      Icons.add_circle_outline,
-                                      size: 18,
-                                      color: Colors.grey[400],
-                                    ),
+                                      if (showTheater.isNotEmpty)
+                                        Text(
+                                          showTheater,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: const Color(0xFF8A8F98),
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -952,7 +1004,7 @@ class _GanttScreenState extends State<GanttScreen> {
                               final showId = entry.key;
                               final perfs = entry.value;
                               final layers = _getLayers(showId, perfs);
-                              final rowH = rowHeights[showId] ?? _getRowHeight(1);
+                              final rowH = rowHeights[showId] ?? _getRowHeight([_minBlockHeight]);
 
                               // 按 dayIndex 分组
                               final dayGroups = <int, List<Map<String, dynamic>>>{};
@@ -983,7 +1035,7 @@ class _GanttScreenState extends State<GanttScreen> {
                                 decoration: BoxDecoration(
                                   border: Border(
                                       bottom: BorderSide(
-                                          color: Colors.grey[100]!)),
+                                          color: const Color(0xFF1F1F1F))),
                                 ),
                                 child: Stack(
                                   children: [
@@ -1003,17 +1055,17 @@ class _GanttScreenState extends State<GanttScreen> {
                                           decoration: BoxDecoration(
                                             border: Border(
                                               right: BorderSide(
-                                                  color: Colors
-                                                      .grey[100]!),
+                                                  color: const Color(
+                                                      0xFF1F1F1F)),
                                             ),
                                             color: isToday
                                                 ? const Color(
-                                                        0xFFFFF0F0)
+                                                        0xFFF54A45)
                                                     .withValues(
-                                                        alpha: 0.4)
+                                                        alpha: 0.08)
                                                 : (isWeekend
                                                     ? const Color(
-                                                            0xFFFAFAFA)
+                                                            0xFF1A1A1A)
                                                     : null),
                                           ),
                                         );
@@ -1045,16 +1097,21 @@ class _GanttScreenState extends State<GanttScreen> {
                                                 : const Color(
                                                     0xFF34D399));
 
-                                        final top = _rowPadding +
-                                            layer *
-                                                (_layerHeight +
-                                                    _layerGap);
+                                        // 计算该区块的 top 位置
+                                        final showLayerHeights = layerHeightsMap[showId] ?? [_minBlockHeight];
+                                        var top = _rowPadding.toDouble();
+                                        for (var i = 0; i < layer && i < showLayerHeights.length; i++) {
+                                          top += showLayerHeights[i] + _layerGap;
+                                        }
+                                        final blockHeight = (layer < showLayerHeights.length)
+                                            ? showLayerHeights[layer]
+                                            : _minBlockHeight;
+
                                         final perfId = perf['id'] as int;
                                         final featuredCasts =
                                             (_castMap[perfId] ?? [])
                                                 .where((c) =>
                                                     c.isFeatured == true)
-                                                .take(2)
                                                 .toList();
 
                                         return Positioned(
@@ -1067,7 +1124,7 @@ class _GanttScreenState extends State<GanttScreen> {
                                                     perf),
                                             child: Container(
                                               width: cellWidth - 4,
-                                              height: _layerHeight,
+                                              height: blockHeight,
                                               decoration: BoxDecoration(
                                                 color: isUnmarked
                                                     ? statusColor
@@ -1106,7 +1163,7 @@ class _GanttScreenState extends State<GanttScreen> {
                                                           status == PerformanceStatus.wantToSee
                                                               ? Icons.star
                                                               : Icons.check,
-                                                          size: 9,
+                                                          size: 12,
                                                           color: Colors
                                                               .white
                                                               .withValues(
@@ -1206,9 +1263,9 @@ class _GanttScreenState extends State<GanttScreen> {
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-        color: Colors.white,
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFF2A2A2A))),
+        color: Color(0xFF181818),
       ),
       child: Row(
         children: [
@@ -1219,7 +1276,7 @@ class _GanttScreenState extends State<GanttScreen> {
           ),
           OutlinedButton.icon(
             onPressed: _goToToday,
-            icon: const Icon(Icons.today, size: 16),
+            icon: const Icon(Icons.today, size: 18),
             label: const Text('今天'),
             style: OutlinedButton.styleFrom(
               padding:
@@ -1238,22 +1295,560 @@ class _GanttScreenState extends State<GanttScreen> {
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
-              color: Color(0xFF1F2329),
+              color: Colors.white,
             ),
           ),
           const Spacer(),
-          FilledButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => const AddShowScreen()),
-              ).then((_) => _loadData());
-            },
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text('添加剧目'),
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: const Color(0xFF6B5BCD),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: IconButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  SlideFadeRoute(
+                      page: const AddShowScreen()),
+                ).then((_) => _loadData());
+              },
+              icon: const Icon(Icons.add, size: 28),
+              color: Colors.white,
+              tooltip: '添加剧目',
+            ),
+          ),
+          const SizedBox(width: 12),
+        ],
+      ),
+    );
+  }
+
+  // 显示剧目管理面板（点击左侧剧目名称触发）
+  void _showShowDetail(int showId, String showName) async {
+    final db = DatabaseHelper.instance;
+    final perfs = await db.getPerformancesByShowId(showId);
+    final show = await db.getShowById(showId);
+
+    if (!mounted) return;
+    // ignore: use_build_context_synchronously
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => _ShowManagementSheet(
+        showId: showId,
+        showName: showName,
+        showTheater: show?.theater,
+        performances: perfs,
+        onDataChanged: _loadData,
+        onQuickAdd: (id) {
+          Navigator.pop(sheetContext);
+          _quickAddPerformance(id);
+        },
+        onEditPerformance: (perfMap) {
+          Navigator.pop(sheetContext);
+          _editPerformance(perfMap);
+        },
+      ),
+    );
+  }
+
+  Future<void> _toggleStatus(Performance perf) async {
+    final next = perf.status == 'bought'
+        ? 'unmarked'
+        : perf.status == 'want_to_see'
+            ? 'bought'
+            : 'want_to_see';
+    await DatabaseHelper.instance.updatePerformance(perf.copyWith(status: next));
+    _loadData();
+  }
+
+  Future<void> _deletePerformance(int perfId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: const Text('删除后不可恢复，确定吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
           ),
         ],
+      ),
+    );
+    if (confirmed == true) {
+      await DatabaseHelper.instance.deleteCastMembersByPerformanceId(perfId);
+      await DatabaseHelper.instance.deletePerformance(perfId);
+      _loadData();
+    }
+  }
+
+}
+
+// ==================== 剧目管理面板 ====================
+
+enum _ShowFilter { all, wantToSee, bought, watched }
+
+class _ShowManagementSheet extends StatefulWidget {
+  final int showId;
+  final String showName;
+  final String? showTheater;
+  final List<Performance> performances;
+  final VoidCallback onDataChanged;
+  final void Function(int showId) onQuickAdd;
+  final void Function(Map<String, dynamic>) onEditPerformance;
+
+  const _ShowManagementSheet({
+    required this.showId,
+    required this.showName,
+    this.showTheater,
+    required this.performances,
+    required this.onDataChanged,
+    required this.onQuickAdd,
+    required this.onEditPerformance,
+  });
+
+  @override
+  State<_ShowManagementSheet> createState() => _ShowManagementSheetState();
+}
+
+class _ShowManagementSheetState extends State<_ShowManagementSheet> {
+  late String _showName;
+  late String? _showTheater;
+  bool _isEditing = false;
+  _ShowFilter _filter = _ShowFilter.all;
+  late List<Performance> _performances;
+
+  final _nameController = TextEditingController();
+  final _theaterController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _showName = widget.showName;
+    _showTheater = widget.showTheater;
+    _performances = List.from(widget.performances);
+    _nameController.text = _showName;
+    _theaterController.text = _showTheater ?? '';
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _theaterController.dispose();
+    super.dispose();
+  }
+
+  bool _isWatched(Performance perf) {
+    if (perf.status != 'bought') return false;
+    final perfDate = DateTime.parse(perf.date);
+    final today = DateTime.now();
+    return perfDate.isBefore(DateTime(today.year, today.month, today.day));
+  }
+
+  List<Performance> get _filteredPerformances {
+    switch (_filter) {
+      case _ShowFilter.all:
+        return _performances;
+      case _ShowFilter.wantToSee:
+        return _performances.where((p) => p.status == 'want_to_see').toList();
+      case _ShowFilter.bought:
+        return _performances.where((p) => p.status == 'bought' && !_isWatched(p)).toList();
+      case _ShowFilter.watched:
+        return _performances.where((p) => _isWatched(p)).toList();
+    }
+  }
+
+  Future<void> _saveShowInfo() async {
+    final db = DatabaseHelper.instance;
+    final show = await db.getShowById(widget.showId);
+    if (show != null) {
+      await db.updateShow(show.copyWith(
+        name: _nameController.text.trim(),
+        theater: _theaterController.text.trim().isEmpty ? null : _theaterController.text.trim(),
+      ));
+      setState(() {
+        _showName = _nameController.text.trim();
+        _showTheater = _theaterController.text.trim().isEmpty ? null : _theaterController.text.trim();
+        _isEditing = false;
+      });
+      widget.onDataChanged();
+    }
+  }
+
+  Future<void> _deleteShow() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除剧目'),
+        content: Text('删除「$_showName」将同时删除其所有场次和卡司记录，确定吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      final db = DatabaseHelper.instance;
+      for (final perf in _performances) {
+        if (perf.id != null) {
+          await db.deleteCastMembersByPerformanceId(perf.id!);
+          await db.deletePerformance(perf.id!);
+        }
+      }
+      await db.deleteShow(widget.showId);
+      widget.onDataChanged();
+      if (mounted) Navigator.pop(context);
+    }
+  }
+
+  Future<void> _toggleStatus(Performance perf) async {
+    final next = perf.status == 'bought'
+        ? 'unmarked'
+        : perf.status == 'want_to_see'
+            ? 'bought'
+            : 'want_to_see';
+    await DatabaseHelper.instance.updatePerformance(perf.copyWith(status: next));
+    setState(() {
+      _performances = _performances.map((p) {
+        if (p.id == perf.id) return p.copyWith(status: next);
+        return p;
+      }).toList();
+    });
+    widget.onDataChanged();
+  }
+
+  Future<void> _deletePerformance(int perfId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: const Text('删除后不可恢复，确定吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await DatabaseHelper.instance.deleteCastMembersByPerformanceId(perfId);
+      await DatabaseHelper.instance.deletePerformance(perfId);
+      setState(() {
+        _performances.removeWhere((p) => p.id == perfId);
+      });
+      widget.onDataChanged();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.65,
+      minChildSize: 0.3,
+      maxChildSize: 0.9,
+      expand: false,
+      builder: (context, scrollController) => Column(
+        children: [
+          // 拖拽手柄
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFF4D4D4D),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          // 剧目信息 / 编辑表单
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _isEditing ? _buildEditForm() : _buildShowInfo(),
+          ),
+          const SizedBox(height: 12),
+          // 筛选栏
+          _buildFilterBar(),
+          const Divider(height: 1),
+          // 场次列表
+          Expanded(
+            child: _filteredPerformances.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(
+                        _filter == _ShowFilter.all
+                            ? '暂无排期'
+                            : '暂无符合条件的排期',
+                        style: const TextStyle(color: Color(0xFF8A8F98)),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: scrollController,
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: _filteredPerformances.length,
+                    itemBuilder: (context, index) {
+                      final perf = _filteredPerformances[index];
+                      final isWatched = _isWatched(perf);
+                      final status = statusFromString(perf.status);
+                      final displayLabel = isWatched ? '已观演' : status.label;
+                      final displayColor = isWatched ? const Color(0xFF9CA3AF) : status.color;
+                      final displayIcon = isWatched
+                          ? Icons.visibility
+                          : (perf.status == 'bought'
+                              ? Icons.check_circle
+                              : perf.status == 'want_to_see'
+                                  ? Icons.star
+                                  : Icons.circle_outlined);
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          radius: 18,
+                          backgroundColor: displayColor.withValues(alpha: 0.15),
+                          child: Icon(
+                            displayIcon,
+                            size: 18,
+                            color: displayColor,
+                          ),
+                        ),
+                        title: Text(
+                          '${perf.date} ${perf.time?.substring(0, 5) ?? ''}',
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        subtitle: perf.seat != null && perf.seat!.isNotEmpty
+                            ? Text('座位: ${perf.seat}')
+                            : null,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _StatusBadge(
+                              label: displayLabel,
+                              color: displayColor,
+                              onTap: () => _toggleStatus(perf),
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              onPressed: () => _deletePerformance(perf.id!),
+                              color: Colors.red[300],
+                              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                            ),
+                          ],
+                        ),
+                        onTap: () => widget.onEditPerformance(perf.toMap()),
+                      );
+                    },
+                  ),
+          ),
+          // 底部操作
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _deleteShow,
+                    icon: Icon(Icons.delete_outline, size: 18, color: Colors.red[300]),
+                    label: Text('删除剧目', style: TextStyle(color: Colors.red[300])),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red[300],
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildShowInfo() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _showName,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (_showTheater != null && _showTheater!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    _showTheater!,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF8A8F98),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.edit_outlined, size: 20),
+          onPressed: () => setState(() => _isEditing = true),
+          tooltip: '编辑',
+          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        ),
+        IconButton(
+          icon: const Icon(Icons.add_circle_outline, size: 26),
+          onPressed: () => widget.onQuickAdd(widget.showId),
+          tooltip: '添加场次',
+          color: const Color(0xFF6B5BCD),
+          constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEditForm() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _nameController,
+          decoration: const InputDecoration(
+            labelText: '剧目名称',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          ),
+          style: const TextStyle(fontSize: 15),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _theaterController,
+          decoration: const InputDecoration(
+            labelText: '演出地点',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          ),
+          style: const TextStyle(fontSize: 15),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => setState(() => _isEditing = false),
+                child: const Text('取消'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton(
+                onPressed: _saveShowInfo,
+                child: const Text('保存'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFilterBar() {
+    final filters = [
+      (_ShowFilter.all, '全部', null),
+      (_ShowFilter.wantToSee, '想看', const Color(0xFF811FE2)),
+      (_ShowFilter.bought, '已买', const Color(0xFF34D399)),
+      (_ShowFilter.watched, '已观演', const Color(0xFF9CA3AF)),
+    ];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: filters.map((f) {
+          final isActive = _filter == f.$1;
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: ChoiceChip(
+              label: Text(f.$2),
+              selected: isActive,
+              onSelected: (_) => setState(() => _filter = f.$1),
+              selectedColor: f.$3?.withValues(alpha: 0.2) ?? const Color(0xFF6B5BCD).withValues(alpha: 0.2),
+              backgroundColor: const Color(0xFF1F1F1F),
+              side: BorderSide(
+                color: isActive
+                    ? (f.$3 ?? const Color(0xFF6B5BCD)).withValues(alpha: 0.5)
+                    : const Color(0xFF2A2A2A),
+              ),
+              labelStyle: TextStyle(
+                color: isActive ? (f.$3 ?? const Color(0xFF6B5BCD)) : const Color(0xFF8A8F98),
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                fontSize: 12,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ==================== 状态标签组件 ====================
+
+class _StatusBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _StatusBadge({
+    required this.label,
+    required this.color,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: color,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
@@ -1354,7 +1949,7 @@ class _EditPerformanceSheetState extends State<_EditPerformanceSheet> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: const Color(0xFF4D4D4D),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1474,7 +2069,7 @@ class _EditPerformanceSheetState extends State<_EditPerformanceSheet> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: const Color(0xFF4D4D4D),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -1645,6 +2240,50 @@ class _EditPerformanceSheetState extends State<_EditPerformanceSheet> {
           ),
         );
       },
+    );
+  }
+}
+
+class _BreathingIcon extends StatefulWidget {
+  final IconData icon;
+  const _BreathingIcon({required this.icon});
+
+  @override
+  State<_BreathingIcon> createState() => _BreathingIconState();
+}
+
+class _BreathingIconState extends State<_BreathingIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 2000),
+      vsync: this,
+    )..repeat(reverse: true);
+    _animation = Tween<double>(begin: 0, end: 4).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) => Transform.translate(
+        offset: Offset(0, -_animation.value),
+        child: child,
+      ),
+      child: Icon(widget.icon, size: 72, color: const Color(0xFF4D4D4D)),
     );
   }
 }

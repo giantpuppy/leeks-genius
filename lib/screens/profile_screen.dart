@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
 import '../models/show.dart';
 import '../models/performance.dart';
+import '../utils/page_transitions.dart';
+import '../utils/data_backup.dart';
 import '../models/actor.dart';
+import '../services/user_service.dart';
 import 'add_show_screen.dart';
+import 'ocr_settings_screen.dart';
+import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -18,6 +22,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<Performance> _performances = [];
   List<Actor> _actors = [];
   bool _isLoading = true;
+  String? _currentUser;
 
   int get _wantToSeeCount =>
       _performances.where((p) => p.status == 'want_to_see').length;
@@ -50,11 +55,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final shows = await db.getAllShows();
     final performances = await db.getAllPerformances();
     final actors = await db.getAllActors();
+    final currentUser = await UserService.getCurrentUsername();
 
     setState(() {
       _shows = shows;
       _performances = performances;
       _actors = actors;
+      _currentUser = currentUser;
       _isLoading = false;
     });
   }
@@ -126,11 +133,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('我的'),
+        foregroundColor: Colors.white,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : CustomScrollView(
               slivers: [
+                // 用户信息
+                SliverToBoxAdapter(
+                  child: _buildUserHeader(),
+                ),
                 // 统计卡片
                 SliverToBoxAdapter(
                   child: _buildStatsSection(),
@@ -147,6 +159,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
     );
+  }
+
+  Widget _buildUserHeader() {
+    final displayName = _currentUser ?? '未登录';
+    final isLoggedIn = _currentUser != null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 28,
+            backgroundColor: const Color(0xFF6B5BCD).withValues(alpha: 0.2),
+            child: Text(
+              displayName.substring(0, 1).toUpperCase(),
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF6B5BCD),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  displayName,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isLoggedIn ? '已登录用户' : '本地使用',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF8A8F98),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: _switchUser,
+            icon: const Icon(Icons.swap_horiz, size: 18),
+            label: const Text('切换'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _switchUser() async {
+    await UserService.logout();
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (_) => false,
+      );
+    }
   }
 
   Widget _buildStatsSection() {
@@ -195,7 +270,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 24),
+            Icon(icon, color: color, size: 22),
             const SizedBox(height: 8),
             Text(
               value,
@@ -311,7 +386,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           '${perf.time?.substring(0, 5) ?? ''}  ${show.theater ?? ''}',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey[600],
+                            color: const Color(0xFFB3B3B3),
                           ),
                         ),
                       ],
@@ -372,6 +447,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
             subtitle: '${_actors.length} 人',
             onTap: () => _showActorsSheet(),
           ),
+          const SizedBox(height: 24),
+          const Text(
+            '设置',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildManageCard(
+            icon: Icons.document_scanner,
+            title: 'OCR 识别设置',
+            subtitle: '配置百度 OCR API Key',
+            onTap: () => Navigator.push(
+              context,
+              SlideFadeRoute(page: const OcrSettingsScreen()),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            '数据',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildManageCard(
+            icon: Icons.download,
+            title: '导出备份',
+            subtitle: 'JSON 格式',
+            onTap: () async {
+              await DataBackup.exportToJson();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('备份已下载')),
+                );
+              }
+            },
+          ),
+          const SizedBox(height: 8),
+          _buildManageCard(
+            icon: Icons.upload,
+            title: '导入恢复',
+            subtitle: '选择 JSON 备份文件',
+            onTap: () async {
+              final result = await DataBackup.importFromJson();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(result ?? '已取消')),
+                );
+                _loadData();
+              }
+            },
+          ),
         ],
       ),
     );
@@ -387,13 +517,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: Colors.grey[200]!),
+        side: const BorderSide(color: Color(0xFF2A2A2A)),
       ),
       child: ListTile(
         leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
         title: Text(title),
         subtitle: Text(subtitle),
-        trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
+        trailing: const Icon(Icons.chevron_right, color: Color(0xFF8A8F98)),
         onTap: onTap,
       ),
     );
@@ -432,8 +562,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (context) => const AddShowScreen(),
+                          SlideFadeRoute(
+                            page: const AddShowScreen(),
                           ),
                         ).then((_) => _loadData());
                       },
@@ -445,7 +575,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: _shows.isEmpty
                     ? Center(
                         child: Text('暂无剧目',
-                            style: TextStyle(color: Colors.grey[400])),
+                            style: const TextStyle(color: Color(0xFF8A8F98))),
                       )
                     : ListView.builder(
                         controller: scrollController,
@@ -516,7 +646,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: _actors.isEmpty
                     ? Center(
                         child: Text('暂无演员',
-                            style: TextStyle(color: Colors.grey[400])),
+                            style: const TextStyle(color: Color(0xFF8A8F98))),
                       )
                     : ListView.builder(
                         controller: scrollController,

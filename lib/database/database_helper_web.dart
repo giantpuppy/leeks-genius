@@ -4,23 +4,39 @@ import '../models/show.dart';
 import '../models/performance.dart';
 import '../models/cast_member.dart';
 import '../models/actor.dart';
+import '../models/ocr_correction.dart';
+import '../models/show_template.dart';
 
 class _WebDB {
+  final String username;
   final Map<String, List<Map<String, dynamic>>> _tables = {};
   final Map<String, int> _autoIncrement = {};
-  static const String _storageKey = 'paiqi_app_v1';
+
+  _WebDB(this.username);
+
+  String get _storageKey => 'paiqi_app_${username}_v1';
 
   Future<void> _save() async {
-    final data = {
-      'tables': _tables,
-      'autoIncrement': _autoIncrement,
-    };
-    window.localStorage[_storageKey] = jsonEncode(data);
+    try {
+      final data = {
+        'tables': _tables,
+        'autoIncrement': _autoIncrement,
+      };
+      final json = jsonEncode(data);
+      window.localStorage[_storageKey] = json;
+      print('[WebDB] Saved ${json.length} bytes to localStorage ($_storageKey)');
+    } catch (e, st) {
+      print('[WebDB] Failed to save: $e');
+      print(st);
+    }
   }
 
   Future<void> _load() async {
     final stored = window.localStorage[_storageKey];
-    if (stored == null || stored.isEmpty) return;
+    if (stored == null || stored.isEmpty) {
+      print('[WebDB] No stored data found for $_storageKey');
+      return;
+    }
     try {
       final data = jsonDecode(stored) as Map<String, dynamic>;
       final tables = data['tables'] as Map<String, dynamic>?;
@@ -28,18 +44,19 @@ class _WebDB {
       if (tables != null) {
         _tables.clear();
         for (final entry in tables.entries) {
-          final rows = (entry.value as List).cast<Map<String, dynamic>>();
-          _tables[entry.key] = rows.map((r) {
-            final row = Map<String, dynamic>.from(r);
-            // 旧数据迁移
-            if (entry.key == 'performances' && !row.containsKey('status')) {
-              row['status'] = 'unmarked';
+          final rows = (entry.value as List<dynamic>).map((r) {
+            final row = Map<String, dynamic>.from(r as Map<dynamic, dynamic>);
+            if (entry.key == 'performances') {
+              if (!row.containsKey('status')) row['status'] = 'unmarked';
+              if (!row.containsKey('actual_price')) row['actual_price'] = null;
             }
             if (entry.key == 'cast_members' && !row.containsKey('is_featured')) {
               row['is_featured'] = 0;
             }
             return row;
           }).toList();
+          _tables[entry.key] = rows;
+          print('[WebDB] Loaded ${rows.length} rows into ${entry.key}');
         }
       }
       if (ai != null) {
@@ -48,8 +65,15 @@ class _WebDB {
           _autoIncrement[entry.key] = (entry.value as num).toInt();
         }
       }
-    } catch (_) {
-      // ignore corrupt data
+      // 确保新表存在
+      _tables.putIfAbsent('ocr_corrections', () => []);
+      _tables.putIfAbsent('show_templates', () => []);
+      _autoIncrement.putIfAbsent('ocr_corrections', () => 0);
+      _autoIncrement.putIfAbsent('show_templates', () => 0);
+      print('[WebDB] Data loaded successfully for $_storageKey');
+    } catch (e, st) {
+      print('[WebDB] Failed to load data: $e');
+      print(st);
     }
   }
 
@@ -240,14 +264,27 @@ class _WebDB {
 }
 
 class DatabaseHelper {
-  static final DatabaseHelper instance = DatabaseHelper._init();
+  static DatabaseHelper? _instance;
+  static String _username = 'default';
   static _WebDB? _db;
   bool _initialized = false;
 
   DatabaseHelper._init();
 
+  static DatabaseHelper get instance {
+    _instance ??= DatabaseHelper._init();
+    return _instance!;
+  }
+
+  static Future<void> switchUser(String username) async {
+    if (_username == username) return;
+    _username = username;
+    _db = null;
+    _instance?._initialized = false;
+  }
+
   Future<_WebDB> get database async {
-    _db ??= _WebDB();
+    _db ??= _WebDB(_username);
     if (!_initialized) {
       await _initDB();
       _initialized = true;
@@ -256,6 +293,7 @@ class DatabaseHelper {
   }
 
   Future<void> _initDB() async {
+    print('[WebDB] Initializing database for user: $_username');
     final db = _db!;
     await db.execute('''
       CREATE TABLE shows (
@@ -273,6 +311,7 @@ class DatabaseHelper {
         time TEXT,
         seat TEXT,
         price REAL,
+        actual_price REAL,
         status TEXT DEFAULT 'unmarked',
         created_at TEXT,
         FOREIGN KEY (show_id) REFERENCES shows (id) ON DELETE CASCADE
@@ -297,7 +336,30 @@ class DatabaseHelper {
         created_at TEXT
       )
     ''');
+    await db.execute('''
+      CREATE TABLE ocr_corrections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ocr_text TEXT NOT NULL,
+        corrected_text TEXT NOT NULL,
+        category TEXT,
+        use_count INTEGER DEFAULT 1,
+        created_at TEXT,
+        UNIQUE(ocr_text, category)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE show_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        theater TEXT,
+        roles TEXT NOT NULL,
+        performance_count INTEGER DEFAULT 1,
+        created_at TEXT,
+        updated_at TEXT
+      )
+    ''');
     await db._load();
+    print('[WebDB] Init complete for user: $_username');
   }
 
   Future close() async {}
@@ -409,6 +471,12 @@ class DatabaseHelper {
     return result.map((json) => CastMember.fromMap(json)).toList();
   }
 
+  Future<List<CastMember>> getAllCastMembers() async {
+    final db = await instance.database;
+    final result = await db.query('cast_members');
+    return result.map((json) => CastMember.fromMap(json)).toList();
+  }
+
   Future<int> deleteCastMembersByPerformanceId(int performanceId) async {
     final db = await instance.database;
     return db.delete('cast_members', where: 'performance_id = ?', whereArgs: [performanceId]);
@@ -463,5 +531,99 @@ class DatabaseHelper {
     );
     if (result.isNotEmpty) return result.first;
     return null;
+  }
+
+  // ========== OCR Corrections ==========
+  Future<OcrCorrection> createOcrCorrection(OcrCorrection correction) async {
+    final db = await instance.database;
+    final existing = await getOcrCorrectionByText(correction.ocrText, correction.category);
+    if (existing != null) {
+      final updated = existing.copyWith(
+        correctedText: correction.correctedText,
+        useCount: existing.useCount + 1,
+      );
+      await db.update(
+        'ocr_corrections',
+        updated.toMap(),
+        where: 'id = ?',
+        whereArgs: [existing.id],
+      );
+      return updated;
+    }
+    final id = await db.insert('ocr_corrections', correction.toMap());
+    return correction.copyWith(id: id);
+  }
+
+  Future<List<OcrCorrection>> getOcrCorrectionsByCategory(String category) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'ocr_corrections',
+      where: 'category = ?',
+      whereArgs: [category],
+      orderBy: 'use_count DESC',
+    );
+    return result.map((json) => OcrCorrection.fromMap(json)).toList();
+  }
+
+  Future<OcrCorrection?> getOcrCorrectionByText(String ocrText, String category) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'ocr_corrections',
+      where: 'ocr_text = ? AND category = ?',
+      whereArgs: [ocrText, category],
+    );
+    if (maps.isNotEmpty) return OcrCorrection.fromMap(maps.first);
+    return null;
+  }
+
+  Future<List<OcrCorrection>> getAllOcrCorrections() async {
+    final db = await instance.database;
+    final result = await db.query('ocr_corrections', orderBy: 'use_count DESC');
+    return result.map((json) => OcrCorrection.fromMap(json)).toList();
+  }
+
+  // ========== Show Templates ==========
+  Future<ShowTemplate> createShowTemplate(ShowTemplate template) async {
+    final db = await instance.database;
+    final existing = await getShowTemplateByName(template.name);
+    if (existing != null) {
+      final merged = existing.mergeRoles(template.roles);
+      await db.update(
+        'show_templates',
+        merged.toMap(),
+        where: 'id = ?',
+        whereArgs: [existing.id],
+      );
+      return merged.copyWith(id: existing.id);
+    }
+    final id = await db.insert('show_templates', template.toMap());
+    return template.copyWith(id: id);
+  }
+
+  Future<ShowTemplate?> getShowTemplateByName(String name) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'show_templates',
+      where: 'name = ?',
+      whereArgs: [name],
+    );
+    if (maps.isNotEmpty) return ShowTemplate.fromMap(maps.first);
+    return null;
+  }
+
+  Future<List<ShowTemplate>> getAllShowTemplates() async {
+    final db = await instance.database;
+    final result = await db.query('show_templates', orderBy: 'performance_count DESC');
+    return result.map((json) => ShowTemplate.fromMap(json)).toList();
+  }
+
+  Future<int> updateShowTemplate(ShowTemplate template) async {
+    final db = await instance.database;
+    return db.update(
+      'show_templates',
+      template.toMap(),
+      where: 'id = ?',
+      whereArgs: [template.id],
+    );
   }
 }

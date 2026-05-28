@@ -4,16 +4,36 @@ import '../models/show.dart';
 import '../models/performance.dart';
 import '../models/cast_member.dart';
 import '../models/actor.dart';
+import '../models/ocr_correction.dart';
+import '../models/show_template.dart';
 
 class DatabaseHelper {
-  static final DatabaseHelper instance = DatabaseHelper._init();
+  static DatabaseHelper? _instance;
+  static String _dbName = 'paiqi_app.db';
   static Database? _database;
 
   DatabaseHelper._init();
 
+  static DatabaseHelper get instance {
+    _instance ??= DatabaseHelper._init();
+    return _instance!;
+  }
+
+  /// 切换用户：关闭当前数据库，下次访问时自动打开新用户的数据库
+  static Future<void> switchUser(String username) async {
+    final newName = '${username}_paiqi.db';
+    if (_dbName == newName) return;
+
+    if (_database != null) {
+      await _database!.close();
+      _database = null;
+    }
+    _dbName = newName;
+  }
+
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('paiqi_app.db');
+    _database = await _initDB(_dbName);
     return _database!;
   }
 
@@ -23,19 +43,51 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 6,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
+    // 不管当前版本，始终尝试补缺失的列（已存在会报错，忽略即可）
+    try {
       await db.execute('ALTER TABLE performances ADD COLUMN status TEXT DEFAULT \'unmarked\'');
-    }
-    if (oldVersion < 3) {
+    } catch (_) {}
+    try {
       await db.execute('ALTER TABLE cast_members ADD COLUMN is_featured INTEGER DEFAULT 0');
-    }
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE performances ADD COLUMN actual_price REAL');
+    } catch (_) {}
+
+    // v6: 添加知识库表
+    try {
+      await db.execute('''
+        CREATE TABLE ocr_corrections (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ocr_text TEXT NOT NULL,
+          corrected_text TEXT NOT NULL,
+          category TEXT,
+          use_count INTEGER DEFAULT 1,
+          created_at TEXT,
+          UNIQUE(ocr_text, category)
+        )
+      ''');
+    } catch (_) {}
+    try {
+      await db.execute('''
+        CREATE TABLE show_templates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          theater TEXT,
+          roles TEXT NOT NULL,
+          performance_count INTEGER DEFAULT 1,
+          created_at TEXT,
+          updated_at TEXT
+        )
+      ''');
+    } catch (_) {}
   }
 
   Future _createDB(Database db, int version) async {
@@ -56,6 +108,7 @@ class DatabaseHelper {
         time TEXT,
         seat TEXT,
         price REAL,
+        actual_price REAL,
         status TEXT DEFAULT 'unmarked',
         created_at TEXT,
         FOREIGN KEY (show_id) REFERENCES shows (id) ON DELETE CASCADE
@@ -80,6 +133,30 @@ class DatabaseHelper {
         name TEXT NOT NULL UNIQUE,
         note TEXT,
         created_at TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE ocr_corrections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ocr_text TEXT NOT NULL,
+        corrected_text TEXT NOT NULL,
+        category TEXT,
+        use_count INTEGER DEFAULT 1,
+        created_at TEXT,
+        UNIQUE(ocr_text, category)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE show_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        theater TEXT,
+        roles TEXT NOT NULL,
+        performance_count INTEGER DEFAULT 1,
+        created_at TEXT,
+        updated_at TEXT
       )
     ''');
   }
@@ -199,6 +276,12 @@ class DatabaseHelper {
     return result.map((json) => CastMember.fromMap(json)).toList();
   }
 
+  Future<List<CastMember>> getAllCastMembers() async {
+    final db = await instance.database;
+    final result = await db.query('cast_members');
+    return result.map((json) => CastMember.fromMap(json)).toList();
+  }
+
   Future<int> deleteCastMembersByPerformanceId(int performanceId) async {
     final db = await instance.database;
     return db.delete('cast_members', where: 'performance_id = ?', whereArgs: [performanceId]);
@@ -268,5 +351,110 @@ class DatabaseHelper {
     ''', [performanceId]);
     if (result.isNotEmpty) return result.first;
     return null;
+  }
+
+  // ========== OCR Corrections ==========
+  Future<OcrCorrection> createOcrCorrection(OcrCorrection correction) async {
+    final db = await instance.database;
+    try {
+      final id = await db.insert('ocr_corrections', correction.toMap());
+      return correction.copyWith(id: id);
+    } catch (e) {
+      // 已存在则更新
+      await db.update(
+        'ocr_corrections',
+        {
+          'corrected_text': correction.correctedText,
+          'use_count': correction.useCount + 1,
+        },
+        where: 'ocr_text = ? AND category = ?',
+        whereArgs: [correction.ocrText, correction.category],
+      );
+      final maps = await db.query(
+        'ocr_corrections',
+        where: 'ocr_text = ? AND category = ?',
+        whereArgs: [correction.ocrText, correction.category],
+      );
+      if (maps.isNotEmpty) return OcrCorrection.fromMap(maps.first);
+      return correction;
+    }
+  }
+
+  Future<List<OcrCorrection>> getOcrCorrectionsByCategory(String category) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'ocr_corrections',
+      where: 'category = ?',
+      whereArgs: [category],
+      orderBy: 'use_count DESC',
+    );
+    return result.map((json) => OcrCorrection.fromMap(json)).toList();
+  }
+
+  Future<OcrCorrection?> getOcrCorrectionByText(String ocrText, String category) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'ocr_corrections',
+      where: 'ocr_text = ? AND category = ?',
+      whereArgs: [ocrText, category],
+    );
+    if (maps.isNotEmpty) return OcrCorrection.fromMap(maps.first);
+    return null;
+  }
+
+  Future<List<OcrCorrection>> getAllOcrCorrections() async {
+    final db = await instance.database;
+    final result = await db.query('ocr_corrections', orderBy: 'use_count DESC');
+    return result.map((json) => OcrCorrection.fromMap(json)).toList();
+  }
+
+  // ========== Show Templates ==========
+  Future<ShowTemplate> createShowTemplate(ShowTemplate template) async {
+    final db = await instance.database;
+    try {
+      final id = await db.insert('show_templates', template.toMap());
+      return template.copyWith(id: id);
+    } catch (e) {
+      // 已存在则合并角色列表
+      final existing = await getShowTemplateByName(template.name);
+      if (existing != null) {
+        final merged = existing.mergeRoles(template.roles);
+        await db.update(
+          'show_templates',
+          merged.toMap(),
+          where: 'id = ?',
+          whereArgs: [existing.id],
+        );
+        return merged.copyWith(id: existing.id);
+      }
+      return template;
+    }
+  }
+
+  Future<ShowTemplate?> getShowTemplateByName(String name) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'show_templates',
+      where: 'name = ?',
+      whereArgs: [name],
+    );
+    if (maps.isNotEmpty) return ShowTemplate.fromMap(maps.first);
+    return null;
+  }
+
+  Future<List<ShowTemplate>> getAllShowTemplates() async {
+    final db = await instance.database;
+    final result = await db.query('show_templates', orderBy: 'performance_count DESC');
+    return result.map((json) => ShowTemplate.fromMap(json)).toList();
+  }
+
+  Future<int> updateShowTemplate(ShowTemplate template) async {
+    final db = await instance.database;
+    return db.update(
+      'show_templates',
+      template.toMap(),
+      where: 'id = ?',
+      whereArgs: [template.id],
+    );
   }
 }

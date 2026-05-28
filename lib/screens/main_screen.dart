@@ -22,6 +22,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF121212),
       body: _pages[_currentIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
@@ -39,7 +40,7 @@ class _MainScreenState extends State<MainScreen> {
           NavigationDestination(
             icon: Icon(Icons.view_timeline_outlined),
             selectedIcon: Icon(Icons.view_timeline),
-            label: '甘特图',
+            label: '排期',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),

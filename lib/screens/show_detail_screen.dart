@@ -111,7 +111,7 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
                   Icon(
                     Icons.calendar_today,
                     color: Theme.of(context).colorScheme.primary,
-                    size: 20,
+                    size: 22,
                   ),
                   const SizedBox(width: 12),
                   Text(
@@ -143,13 +143,13 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
                   Row(
                     children: [
                       Icon(Icons.location_on_outlined,
-                          size: 16, color: Colors.grey[600]),
+                          size: 22, color: const Color(0xFFB3B3B3)),
                       const SizedBox(width: 4),
                       Text(
                         _detail!['theater'] ?? '未知剧场',
                         style: TextStyle(
                           fontSize: 14,
-                          color: Colors.grey[600],
+                          color: const Color(0xFFB3B3B3),
                         ),
                       ),
                     ],
@@ -244,7 +244,7 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
                         ),
                         decoration: BoxDecoration(
                           border: Border(
-                            bottom: BorderSide(color: Colors.grey[200]!),
+                            bottom: BorderSide(color: const Color(0xFF2A2A2A)),
                           ),
                         ),
                         child: Row(
@@ -253,7 +253,7 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
                               flex: 2,
                               child: Text(
                                 cast.role,
-                                style: TextStyle(color: Colors.grey[700]),
+                                style: const TextStyle(color: Color(0xFFB3B3B3)),
                               ),
                             ),
                             Expanded(
@@ -286,7 +286,7 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey[200]!),
+        side: const BorderSide(color: Color(0xFF2A2A2A)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -302,11 +302,11 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
   }) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: Colors.grey[600]),
+        Icon(icon, size: 18, color: const Color(0xFFB3B3B3)),
         const SizedBox(width: 12),
         Text(
           label,
-          style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+          style: const TextStyle(fontSize: 14, color: Color(0xFFB3B3B3)),
         ),
         const Spacer(),
         Text(

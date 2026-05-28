@@ -4,7 +4,8 @@ class Performance {
   String date;
   String? time;
   String? seat;
-  double? price;
+  double? price;     // 票面价格
+  double? actualPrice; // 实付价格
   String? status; // unmarked | want_to_see | bought
   String? createdAt;
 
@@ -15,6 +16,7 @@ class Performance {
     this.time,
     this.seat,
     this.price,
+    this.actualPrice,
     this.status,
     this.createdAt,
   });
@@ -27,6 +29,7 @@ class Performance {
       'time': time,
       'seat': seat,
       'price': price,
+      'actual_price': actualPrice,
       'status': status ?? 'unmarked',
       'created_at': createdAt,
     };
@@ -40,6 +43,7 @@ class Performance {
       time: map['time'] as String?,
       seat: map['seat'] as String?,
       price: map['price'] != null ? (map['price'] as num).toDouble() : null,
+      actualPrice: map['actual_price'] != null ? (map['actual_price'] as num).toDouble() : null,
       status: map['status'] as String? ?? 'unmarked',
       createdAt: map['created_at'] as String?,
     );
@@ -52,6 +56,7 @@ class Performance {
     String? time,
     String? seat,
     double? price,
+    double? actualPrice,
     String? status,
     String? createdAt,
   }) {
@@ -62,6 +67,7 @@ class Performance {
       time: time ?? this.time,
       seat: seat ?? this.seat,
       price: price ?? this.price,
+      actualPrice: actualPrice ?? this.actualPrice,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
     );

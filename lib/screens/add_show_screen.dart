@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import '../database/database_helper.dart';
 import '../models/show.dart';
 import '../models/performance.dart';
 import '../models/cast_member.dart';
 import '../models/actor.dart';
+import '../utils/ocr_service.dart';
+import '../utils/knowledge_base.dart';
 
 class AddShowScreen extends StatefulWidget {
   const AddShowScreen({super.key});
@@ -59,6 +62,9 @@ class _AddShowScreenState extends State<AddShowScreen> {
   final DateFormat _fullDateFormat = DateFormat('yyyy-MM-dd');
 
   bool _isSaving = false;
+  bool _isRecognizing = false;
+  List<CastEntry>? _lastOcrRawResult;
+  List<String> _actorNames = [];
 
   static const List<String> _timePresets = ['14:00', '14:30', '19:00', '19:30'];
 
@@ -67,6 +73,16 @@ class _AddShowScreenState extends State<AddShowScreen> {
     super.initState();
     _addPerformance();
     _addRole();
+    _loadActorNames();
+  }
+
+  Future<void> _loadActorNames() async {
+    final actors = await DatabaseHelper.instance.getAllActors();
+    if (mounted) {
+      setState(() {
+        _actorNames = actors.map((a) => a.name).toList();
+      });
+    }
   }
 
   void _addPerformance() {
@@ -175,6 +191,198 @@ class _AddShowScreenState extends State<AddShowScreen> {
     }
   }
 
+  // ==================== OCR ====================
+
+  Future<void> _pickImageAndRecognize() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (picked == null) return;
+
+    setState(() => _isRecognizing = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      String text;
+      try {
+        text = await recognizeTextAuto(bytes);
+      } on BaiduOcrException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('百度 OCR 失败: $e，请检查配置')),
+          );
+        }
+        return;
+      }
+
+      if (text.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('未识别到文字，请尝试更清晰的图片')),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        final actors = await DatabaseHelper.instance.getAllActors();
+        final actorNames = actors.map((a) => a.name).toList();
+
+        if (isScheduleFormat(text)) {
+          final schedule = parseSchedule(text);
+          if (schedule.isEmpty) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('未解析到排期信息')),
+              );
+            }
+            return;
+          }
+          if (schedule.isNotEmpty) {
+            _lastOcrRawResult = schedule.first.castList;
+          }
+          final correctedSchedule = await _correctSchedule(schedule);
+          _fillScheduleToForm(correctedSchedule);
+          await _saveNewActorsFromSchedule(correctedSchedule, actorNames);
+        } else {
+          final castList = parseCastText(text);
+          if (castList.isEmpty) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('未识别到卡司信息，请尝试手动输入')),
+              );
+            }
+            return;
+          }
+          _lastOcrRawResult = castList;
+          final corrected = await correctOcrResult(
+            showName: null,
+            theater: null,
+            castList: castList,
+          );
+          final castEntries = corrected.castList
+              .map((c) => CastEntry(c.role, c.actor))
+              .toList();
+          _fillCastListToForm(castEntries);
+          await _saveNewActors(castEntries, actorNames);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('识别失败: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isRecognizing = false);
+    }
+  }
+
+  Future<List<ScheduleEntry>> _correctSchedule(List<ScheduleEntry> schedule) async {
+    final corrected = <ScheduleEntry>[];
+    for (final entry in schedule) {
+      final result = await correctOcrResult(
+        showName: null,
+        theater: null,
+        castList: entry.castList,
+      );
+      corrected.add(ScheduleEntry(
+        date: entry.date,
+        time: entry.time,
+        castList: result.castList.map((c) => CastEntry(c.role, c.actor)).toList(),
+      ));
+    }
+    return corrected;
+  }
+
+  void _fillCastListToForm(List<CastEntry> castList) {
+    final oldRoles = List<_RoleColumn>.from(_roles);
+    setState(() {
+      _roles.clear();
+      for (final entry in castList) {
+        final role = _RoleColumn();
+        role.roleController.text = entry.role;
+        role.sync(_performances.length);
+        if (_performances.isNotEmpty) {
+          role.actorControllers[0].text = entry.actor;
+        }
+        _roles.add(role);
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final r in oldRoles) { r.dispose(); }
+    });
+  }
+
+  void _fillScheduleToForm(List<ScheduleEntry> schedule) {
+    final oldPerformances = List<_PerformanceEntry>.from(_performances);
+    final oldRoles = List<_RoleColumn>.from(_roles);
+    setState(() {
+      _performances.clear();
+      _roles.clear();
+
+      if (schedule.isNotEmpty) {
+        final firstEntry = schedule.first;
+        for (final cast in firstEntry.castList) {
+          final role = _RoleColumn();
+          role.roleController.text = cast.role;
+          role.sync(schedule.length);
+          _roles.add(role);
+        }
+
+        for (var i = 0; i < schedule.length; i++) {
+          final entry = schedule[i];
+          final perf = _PerformanceEntry();
+          perf.dateController.text = entry.date;
+          perf.time = entry.time;
+          _performances.add(perf);
+
+          for (var j = 0; j < entry.castList.length && j < _roles.length; j++) {
+            _roles[j].actorControllers[i].text = entry.castList[j].actor;
+          }
+        }
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final p in oldPerformances) { p.dateController.dispose(); }
+      for (final r in oldRoles) { r.dispose(); }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已填充 ${schedule.length} 场演出，${schedule.first.castList.length} 个角色')),
+    );
+  }
+
+  Future<void> _saveNewActors(List<CastEntry> castList, List<String> existingNames) async {
+    final db = DatabaseHelper.instance;
+    var hasNew = false;
+    for (final entry in castList) {
+      if (entry.actor.isNotEmpty && !existingNames.contains(entry.actor)) {
+        await db.createActor(Actor(name: entry.actor));
+        hasNew = true;
+      }
+    }
+    if (hasNew) await _loadActorNames();
+  }
+
+  Future<void> _saveNewActorsFromSchedule(
+    List<ScheduleEntry> schedule,
+    List<String> existingNames,
+  ) async {
+    final db = DatabaseHelper.instance;
+    final seen = <String>{};
+    var hasNew = false;
+    for (final entry in schedule) {
+      for (final cast in entry.castList) {
+        if (cast.actor.isNotEmpty &&
+            !existingNames.contains(cast.actor) &&
+            !seen.contains(cast.actor)) {
+          seen.add(cast.actor);
+          await db.createActor(Actor(name: cast.actor));
+          hasNew = true;
+        }
+      }
+    }
+    if (hasNew) await _loadActorNames();
+  }
+
   Future<void> _saveShow() async {
     if (!_formKey.currentState!.validate()) return;
     if (_performances.isEmpty) {
@@ -227,6 +435,24 @@ class _AddShowScreenState extends State<AddShowScreen> {
           }
         }
       }
+      // 保存到知识库（如果数据来自OCR识别）
+      if (_lastOcrRawResult != null && _roles.isNotEmpty && _performances.isNotEmpty) {
+        final finalCastList = <CastEntry>[];
+        for (final role in _roles) {
+          final roleName = role.roleController.text.trim();
+          final actorName = role.actorControllers[0].text.trim();
+          if (roleName.isNotEmpty && actorName.isNotEmpty) {
+            finalCastList.add(CastEntry(roleName, actorName));
+          }
+        }
+        await saveToKnowledgeBase(
+          showName: _nameController.text.trim(),
+          theater: _theaterController.text.trim().isNotEmpty
+              ? _theaterController.text.trim() : null,
+          castList: finalCastList,
+          originalCastList: _lastOcrRawResult,
+        );
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('剧目添加成功！')));
@@ -246,8 +472,8 @@ class _AddShowScreenState extends State<AddShowScreen> {
   void dispose() {
     _nameController.dispose();
     _theaterController.dispose();
-    for (final p in _performances) p.dateController.dispose();
-    for (final r in _roles) r.dispose();
+    for (final p in _performances) { p.dateController.dispose(); }
+    for (final r in _roles) { r.dispose(); }
     super.dispose();
   }
 
@@ -324,12 +550,46 @@ class _AddShowScreenState extends State<AddShowScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),
+            const SizedBox(height: 12),
+            // OCR识别按钮
+            ElevatedButton.icon(
+              onPressed: _isRecognizing ? null : _pickImageAndRecognize,
+              icon: _isRecognizing
+                  ? const SizedBox(width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.camera_alt, size: 18),
+              label: Text(_isRecognizing ? '识别中...' : '图片识别卡司'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6B5BCD),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
 
             const SizedBox(height: 40),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _showActorPicker(int perfIndex, int roleIndex) async {
+    final controller = _roles[roleIndex].actorControllers[perfIndex];
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => _ActorPickerSheet(
+        actorNames: _actorNames,
+        initialValue: controller.text,
+        onSelected: (value) => Navigator.pop(context, value),
+      ),
+    );
+    if (selected != null && mounted) {
+      controller.text = selected;
+    }
   }
 
   Widget _buildTable() {
@@ -510,6 +770,8 @@ class _AddShowScreenState extends State<AddShowScreen> {
                               child: TextField(
                                 controller: role.actorControllers[pi],
                                 textAlign: TextAlign.center,
+                                readOnly: true,
+                                onTap: () => _showActorPicker(pi, roleEntry.key),
                                 decoration: const InputDecoration(
                                   hintText: '演员',
                                   isDense: true,
@@ -527,6 +789,103 @@ class _AddShowScreenState extends State<AddShowScreen> {
                 ),
               );
             }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActorPickerSheet extends StatefulWidget {
+  final List<String> actorNames;
+  final String initialValue;
+  final ValueChanged<String> onSelected;
+
+  const _ActorPickerSheet({
+    required this.actorNames,
+    required this.initialValue,
+    required this.onSelected,
+  });
+
+  @override
+  State<_ActorPickerSheet> createState() => _ActorPickerSheetState();
+}
+
+class _ActorPickerSheetState extends State<_ActorPickerSheet> {
+  late final TextEditingController _searchController;
+  late List<String> _filtered;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController(text: widget.initialValue);
+    _filtered = widget.actorNames;
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40, height: 4,
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF4D4D4D),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Text('选择演员',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                controller: _searchController,
+                autofocus: true,
+                onChanged: (v) => setState(() {
+                  _filtered = widget.actorNames
+                      .where((n) => n.toLowerCase().contains(v.toLowerCase()))
+                      .toList();
+                }),
+                decoration: const InputDecoration(
+                  hintText: '搜索演员...',
+                  prefixIcon: Icon(Icons.search, size: 20),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _filtered.length,
+                itemBuilder: (context, i) {
+                  return ListTile(
+                    dense: true,
+                    title: Text(_filtered[i]),
+                    onTap: () => widget.onSelected(_filtered[i]),
+                  );
+                },
+              ),
+            ),
+            if (_filtered.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('无匹配演员',
+                    style: TextStyle(color: Color(0xFF8A8F98))),
+              ),
+            const SizedBox(height: 16),
           ],
         ),
       ),

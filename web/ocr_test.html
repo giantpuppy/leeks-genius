@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OCR 验收测试 - 支持任意图片</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 20px auto; padding: 16px; background: #1a1a1a; color: #e0e0e0; }
+    h1 { font-size: 18px; margin-bottom: 16px; }
+    .section { margin: 16px 0; padding: 16px; border: 1px solid #333; border-radius: 8px; background: #222; }
+    button { padding: 10px 20px; font-size: 14px; cursor: pointer; background: #2d5a27; color: white; border: none; border-radius: 4px; }
+    button:disabled { background: #444; cursor: not-allowed; }
+    button.secondary { background: #444; margin-left: 8px; }
+    #result { white-space: pre-wrap; background: #1a1a1a; padding: 12px; border-radius: 4px; margin-top: 12px; min-height: 60px; font-size: 13px; border: 1px solid #333; }
+    .parsed { margin-top: 12px; }
+    .parsed-item { padding: 6px 0; border-bottom: 1px solid #333; display: flex; gap: 12px; }
+    .parsed-item span.role { color: #888; min-width: 80px; }
+    .parsed-item span.actor { color: #e0e0e0; }
+    .success { color: #4caf50; }
+    .error { color: #f44336; }
+    .warn { color: #ff9800; }
+    #status { margin-top: 8px; font-size: 13px; color: #888; }
+    img { max-width: 100%; max-height: 350px; border: 1px solid #333; border-radius: 4px; display: block; margin: 8px 0; }
+    input[type="file"] { display: none; }
+    .file-label { display: inline-block; padding: 10px 20px; background: #333; color: #e0e0e0; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    .file-label:hover { background: #444; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #333; }
+    th { color: #888; font-weight: 500; }
+    .schedule-row:hover { background: #2a2a2a; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    .tab { padding: 6px 14px; background: #333; border: none; color: #888; cursor: pointer; border-radius: 4px; font-size: 13px; }
+    .tab.active { background: #2d5a27; color: white; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .compare { display: flex; gap: 16px; flex-wrap: wrap; }
+    .compare-item { flex: 1; min-width: 200px; }
+    .compare-item h4 { margin: 0 0 8px; font-size: 12px; color: #888; }
+    .params { font-size: 12px; color: #888; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>OCR 验收测试 - 支持任意图片上传</h1>
+
+  <div class="section">
+    <h3>1. 选择图片</h3>
+    <label class="file-label" for="fileInput">选择图片（卡司表/排期表）</label>
+    <input type="file" id="fileInput" accept="image/*" onchange="onFileSelected(event)">
+    <button class="secondary" onclick="usePreset()">使用预设测试图</button>
+    <div class="compare">
+      <div class="compare-item">
+        <h4>原图</h4>
+        <img id="preview" style="display:none;">
+      </div>
+      <div class="compare-item">
+        <h4>预处理后的图（用于 OCR）</h4>
+        <img id="previewProcessed" style="display:none;">
+        <div id="processParams" class="params"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>2. 执行 OCR 识别</h3>
+    <button id="runBtn" onclick="runOCR()" disabled>开始识别</button>
+    <div id="status"></div>
+  </div>
+
+  <div class="section" id="resultSection" style="display:none;">
+    <div class="tabs">
+      <button class="tab active" onclick="showTab('raw', this)">原始文本</button>
+      <button class="tab" onclick="showTab('simple', this)">简单解析（角色->演员）</button>
+      <button class="tab" onclick="showTab('schedule', this)">排期表解析（多场次）</button>
+    </div>
+    <div id="tab-raw" class="tab-content active">
+      <div id="result"></div>
+    </div>
+    <div id="tab-simple" class="tab-content">
+      <div id="parsedSimple"></div>
+    </div>
+    <div id="tab-schedule" class="tab-content">
+      <div id="parsedSchedule"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="ocr_bridge.js"></script>
+  <script>
+    let currentImage = null;
+
+    function setStatus(msg, isError) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = isError ? 'error' : '';
+    }
+
+    function onFileSelected(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        currentImage = e.target.result;
+        document.getElementById('preview').src = currentImage;
+        document.getElementById('preview').style.display = 'block';
+        document.getElementById('runBtn').disabled = false;
+        setStatus('图片已加载，点击"开始识别"');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function usePreset() {
+      currentImage = 'test_cast.jpg';
+      document.getElementById('preview').src = currentImage;
+      document.getElementById('preview').style.display = 'block';
+      document.getElementById('runBtn').disabled = false;
+      setStatus('已加载预设测试图');
+    }
+
+    function showTab(name, btn) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + name).classList.add('active');
+    }
+
+    async function runOCR() {
+      if (!currentImage) return;
+      const btn = document.getElementById('runBtn');
+      btn.disabled = true;
+      btn.textContent = '识别中...';
+      setStatus('正在预处理图片...');
+
+      try {
+        // 先预处理，显示处理后的图片
+        const processed = await window.ocrPreprocess(currentImage);
+        document.getElementById('previewProcessed').src = processed.dataUrl;
+        document.getElementById('previewProcessed').style.display = 'block';
+        document.getElementById('processParams').textContent =
+          `平均亮度: ${processed.avgBrightness} | 反色: ${processed.needInvert} | 阈值: ${processed.threshold}`;
+
+        setStatus('预处理完成，正在 OCR 识别（首次可能需要 10-30 秒）...');
+        const text = await window.ocrRecognize(currentImage);
+
+        if (!text || text.trim().length === 0) {
+          setStatus('识别结果为空', true);
+          document.getElementById('resultSection').style.display = 'block';
+          document.getElementById('result').textContent = '(空)';
+          return;
+        }
+
+        setStatus('识别完成！');
+        document.getElementById('resultSection').style.display = 'block';
+        document.getElementById('result').textContent = text;
+
+        const simpleResults = parseSimple(text);
+        renderSimple(simpleResults);
+
+        const scheduleResults = parseSchedule(text);
+        renderSchedule(scheduleResults);
+
+      } catch (e) {
+        setStatus('识别失败: ' + e.message, true);
+        console.error(e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '开始识别';
+      }
+    }
+
+    function parseSimple(text) {
+      const lines = text.split('\n');
+      const results = [];
+      const skipPatterns = [
+        /^\s*卡司\s*$/i, /^\s*cast\s*$/i, /^\s*主演\s*$/, /^\s*演员表\s*$/,
+        /^\s*角色\s*$/, /^\s*演员\s*$/, /^\s*排期\s*$/, /^\s*日期\s*$/,
+        /^\s*时间\s*$/, /^\s*剧院\s*$/, /^\s*剧场\s*$/, /^\s*本场\s*$/, /^\s*今日\s*$/,
+        /^\s*卡司排期\s*$/i, /^\s*演出场次\s*$/, /^\s*casting\s*$/i,
+      ];
+      const separators = ['  ', '\t', '——', '—', '–', '-', '：', ':', '·', '•'];
+
+      for (const rawLine of lines) {
+        let line = rawLine.trim();
+        if (!line) continue;
+        line = line.replace(/^[_.\-·•\s]+/, '');
+        if (skipPatterns.some(p => p.test(line))) continue;
+        if (/^\d+$/.test(line)) continue;
+        if (/\d+月\d+日/.test(line)) continue;
+
+        let found = false;
+        for (const sep of separators) {
+          const idx = line.indexOf(sep);
+          if (idx === -1) continue;
+          const role = line.substring(0, idx).trim();
+          const actor = line.substring(idx + sep.length).trim();
+          if (role && actor && role.length <= 20 && actor.length <= 20) {
+            results.push({role, actor});
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          const parts = line.split(' ');
+          if (parts.length === 2 && parts[0] && parts[1] && parts[0].length <= 20 && parts[1].length <= 20) {
+            results.push({role: parts[0], actor: parts[1]});
+          }
+        }
+      }
+      return results;
+    }
+
+    function renderSimple(results) {
+      const el = document.getElementById('parsedSimple');
+      if (results.length === 0) {
+        el.innerHTML = '<p class="error">未解析到角色-演员对应关系</p>';
+        return;
+      }
+      let html = `<p class="success">解析到 ${results.length} 条记录：</p>`;
+      for (const r of results) {
+        html += `<div class="parsed-item"><span class="role">${r.role}</span><span>-></span><span class="actor">${r.actor}</span></div>`;
+      }
+      el.innerHTML = html;
+    }
+
+    function parseSchedule(text) {
+      const lines = text.split('\n');
+      const entries = [];
+      let roles = null;
+      let headerLineIndex = -1;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.includes('演出场次') || line.includes('顾静薇') || line.includes('瞿健雄') ||
+            line.includes('丁奚林') || line.includes('角色')) {
+          const parts = splitChineseLine(line);
+          const idx = parts.findIndex(p => p.includes('场次') || p.includes('日期') || p === '角色');
+          if (idx >= 0 && idx + 1 < parts.length) {
+            roles = parts.slice(idx + 1).filter(p => p && p.length > 0 && p.length <= 10);
+            if (roles.length >= 2) {
+              headerLineIndex = i;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!roles || roles.length === 0) return [];
+
+      for (let i = headerLineIndex + 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const dt = extractDateTime(line);
+        if (!dt) continue;
+
+        const actors = extractActors(line, roles.length);
+        if (actors.length >= roles.length) {
+          const castList = [];
+          for (let j = 0; j < roles.length; j++) {
+            castList.push({role: roles[j], actor: actors[j]});
+          }
+          entries.push({date: dt.date, time: dt.time, rawDate: dt.raw, castList});
+        }
+      }
+
+      return entries;
+    }
+
+    function splitChineseLine(line) {
+      return line.split(/[\s\t]+/).filter(p => p.length > 0);
+    }
+
+    function extractDateTime(line) {
+      const patterns = [
+        { regex: /(\d{4})年(\d{1,2})月(\d{1,2})日.*?((?:\d{1,2}):(\d{2}))/, yearGroup: 1, monthGroup: 2, dayGroup: 3, timeGroup: 4 },
+        { regex: /(\d{1,2})月(\d{1,2})日.*?(\d{1,2}):(\d{2})/, yearGroup: null, monthGroup: 1, dayGroup: 2, timeGroup: 3 },
+      ];
+
+      for (const p of patterns) {
+        const m = line.match(p.regex);
+        if (m) {
+          const year = p.yearGroup ? m[p.yearGroup] : new Date().getFullYear();
+          const month = m[p.monthGroup].padStart(2, '0');
+          const day = m[p.dayGroup].padStart(2, '0');
+          let time;
+          if (p.timeGroup === 3) {
+            time = `${m[3].padStart(2, '0')}:${m[4]}`;
+          } else {
+            time = m[p.timeGroup];
+          }
+          return { date: `${year}-${month}-${day}`, time: time, raw: m[0] };
+        }
+      }
+      return null;
+    }
+
+    function extractActors(line, roleCount) {
+      let remaining = line;
+      const dt = extractDateTime(line);
+      if (dt) {
+        remaining = line.substring(line.indexOf(dt.raw) + dt.raw.length);
+      }
+      const parts = splitChineseLine(remaining);
+      return parts.filter(p => {
+        if (p.length === 0 || p.length > 10) return false;
+        if (/^\d+$/.test(p)) return false;
+        if (p.includes('地点') || p.includes('剧院') || p.includes('北京')) return false;
+        return true;
+      });
+    }
+
+    function renderSchedule(entries) {
+      const el = document.getElementById('parsedSchedule');
+      if (entries.length === 0) {
+        el.innerHTML = '<p class="error">未解析到排期表格式（需要包含"演出场次"表头 + 日期行）</p>';
+        return;
+      }
+
+      let html = `<p class="success">解析到 ${entries.length} 场演出：</p>`;
+      html += '<table><thead><tr><th>日期</th><th>时间</th><th>卡司</th></tr></thead><tbody>';
+      for (const e of entries) {
+        const castStr = e.castList.map(c => `${c.role}:${c.actor}`).join(' / ');
+        html += `<tr class="schedule-row"><td>${e.date}</td><td>${e.time}</td><td>${castStr}</td></tr>`;
+      }
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    }
+  </script>
+</body>
+</html>
