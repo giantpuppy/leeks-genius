@@ -346,6 +346,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     calendarStyle: CalendarStyle(
                       markerSize: 6,
                       markersMaxCount: 3,
+                      outsideDaysVisible: false,
                       defaultTextStyle: const TextStyle(color: Colors.white),
                       weekendTextStyle: const TextStyle(color: Color(0xFFB3B3B3)),
                       outsideTextStyle: const TextStyle(color: Color(0xFF444444)),
