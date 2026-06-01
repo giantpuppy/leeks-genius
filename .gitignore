@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Development artifacts
+gen_test.py
+春逝排期.xlsx
+web/ocr_test.html
+web/test_cast.jpg

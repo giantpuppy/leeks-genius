@@ -71,7 +71,11 @@
       "Bash(cmd /c \"where java\")",
       "Bash(cmd /c \"dir /b /ad C:\\\\Progra~1\\\\jdk*\")",
       "Bash(cmd /c \"dir /b /ad C:\\\\Progra~1\\\\Java\")",
-      "Bash(cmd /c \"dir /b /ad C:\\\\Progra~1\\\\Eclipse*\")"
+      "Bash(cmd /c \"dir /b /ad C:\\\\Progra~1\\\\Eclipse*\")",
+      "Bash(kill 1058)",
+      "Bash(kill 684)",
+      "Bash(dart *)",
+      "Bash(pkill -f \"flutter\")"
     ]
   }
 }
