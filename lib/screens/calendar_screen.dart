@@ -8,7 +8,7 @@ import '../widgets/animated_list_item.dart';
 import 'show_detail_screen.dart';
 import 'year_calendar_screen.dart';
 
-enum CalendarFilter { all, wantToSee, bought }
+enum CalendarFilter { all, wantToSee, bought, watched }
 
 extension CalendarFilterExt on CalendarFilter {
   String get label {
@@ -19,6 +19,8 @@ extension CalendarFilterExt on CalendarFilter {
         return '想看';
       case CalendarFilter.bought:
         return '已买';
+      case CalendarFilter.watched:
+        return '已看';
     }
   }
 }
@@ -56,11 +58,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
     if (status == 'unmarked') return false;
     switch (_filter) {
       case CalendarFilter.all:
-        return status == 'want_to_see' || status == 'bought';
+        return status == 'want_to_see' || status == 'bought' || status == 'watched';
       case CalendarFilter.wantToSee:
         return status == 'want_to_see';
       case CalendarFilter.bought:
         return status == 'bought';
+      case CalendarFilter.watched:
+        return status == 'watched';
     }
   }
 
@@ -125,6 +129,30 @@ class _CalendarScreenState extends State<CalendarScreen> {
         }
       });
     }
+  }
+
+  Color _statusColor(String status) {
+    return switch (status) {
+      'want_to_see' => const Color(0xFF811FE2),
+      'watched' => const Color(0xFFD4A853),
+      _ => const Color(0xFF34D399),
+    };
+  }
+
+  String _statusLabel(String status) {
+    return switch (status) {
+      'want_to_see' => '想看',
+      'watched' => '已看',
+      _ => '已买',
+    };
+  }
+
+  IconData _statusIcon(String status) {
+    return switch (status) {
+      'want_to_see' => Icons.star_border,
+      'watched' => Icons.visibility_outlined,
+      _ => Icons.check_circle,
+    };
   }
 
   @override
@@ -197,6 +225,24 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       ],
                     ),
                   ),
+                  ButtonSegment(
+                    value: CalendarFilter.watched,
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFD4A853),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(CalendarFilter.watched.label),
+                      ],
+                    ),
+                  ),
                 ],
                 selected: {_filter},
                 onSelectionChanged: (set) {
@@ -220,7 +266,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 margin: const EdgeInsets.all(12),
                 color: const Color(0xFF181818),
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(8),
                   child: TableCalendar(
                     firstDay: DateTime(2020),
                     lastDay: DateTime(2030),
@@ -232,6 +278,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       CalendarFormat.twoWeeks: '双周',
                       CalendarFormat.week: '周',
                     },
+                    rowHeight: 64,
                     eventLoader: (day) {
                       final normalized = DateTime(day.year, day.month, day.day);
                       return _events[normalized] ?? [];
@@ -251,17 +298,31 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       setState(() => _calendarFormat = format);
                     },
                     calendarBuilders: CalendarBuilders(
+                      dowBuilder: (context, day) {
+                        final weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+                        final isWeekend = day.weekday == DateTime.sunday || day.weekday == DateTime.saturday;
+                        return Center(
+                          child: Text(
+                            weekdays[day.weekday % 7],
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: isWeekend
+                                  ? const Color(0xFFB3B3B3)
+                                  : const Color(0xFF8A8F98),
+                            ),
+                          ),
+                        );
+                      },
                       markerBuilder: (context, date, events) {
                         if (events.isEmpty) return const SizedBox.shrink();
                         return Positioned(
-                          bottom: 1,
+                          bottom: 4,
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: events.take(3).map((e) {
                               final status = (e as Map<String, dynamic>)['status'] as String? ?? 'unmarked';
-                              final color = status == 'want_to_see'
-                                  ? const Color(0xFF811FE2)
-                                  : const Color(0xFF34D399);
+                              final color = _statusColor(status);
                               return Container(
                                 width: 6,
                                 height: 6,
@@ -287,7 +348,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       markersMaxCount: 3,
                       defaultTextStyle: const TextStyle(color: Colors.white),
                       weekendTextStyle: const TextStyle(color: Color(0xFFB3B3B3)),
-                      outsideTextStyle: const TextStyle(color: Color(0xFF8A8F98)),
+                      outsideTextStyle: const TextStyle(color: Color(0xFF444444)),
                       todayDecoration: BoxDecoration(
                         color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
                         shape: BoxShape.circle,
@@ -298,9 +359,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       ),
                     ),
                     headerStyle: const HeaderStyle(
-                      formatButtonVisible: true,
+                      formatButtonVisible: false,
+                      leftChevronVisible: false,
+                      rightChevronVisible: false,
                       titleCentered: true,
                       formatButtonShowsNext: false,
+                      titleTextStyle: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
                     ),
                     locale: 'zh_CN',
                   ),
@@ -365,10 +433,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           final index = entry.key;
                           final perf = entry.value;
                           final status = perf['status'] as String? ?? 'unmarked';
-                          final isWantToSee = status == 'want_to_see';
-                          final statusColor = isWantToSee
-                              ? const Color(0xFF811FE2)
-                              : const Color(0xFF34D399);
+                          final statusColor = _statusColor(status);
 
                           return AnimatedListItem(
                             index: index,
@@ -404,9 +469,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                         ),
                                         const SizedBox(height: 2),
                                         Icon(
-                                          isWantToSee
-                                              ? Icons.star_border
-                                              : Icons.check_circle,
+                                          _statusIcon(status),
                                           size: 12,
                                           color: statusColor,
                                         ),
@@ -437,7 +500,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Text(
-                                    isWantToSee ? '想看' : '已买',
+                                    _statusLabel(status),
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
@@ -481,13 +544,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
         : lunarDay;
 
     final textColor = isOutside
-        ? const Color(0xFF8A8F98)
+        ? const Color(0xFF444444)
         : (day.weekday >= 6
             ? const Color(0xFFB3B3B3)
             : Colors.white);
 
+    final lunarColor = isSelected || isToday
+        ? Colors.white.withValues(alpha: 0.8)
+        : (isOutside
+            ? const Color(0xFF3A3A3A)
+            : const Color(0xFF8A8F98));
+
     return Container(
-      margin: const EdgeInsets.all(2),
+      margin: const EdgeInsets.all(4),
       decoration: isSelected
           ? BoxDecoration(
               color: Theme.of(context).colorScheme.primary,
@@ -505,7 +574,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
           Text(
             '${day.day}',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: 15,
               fontWeight: isToday || isSelected ? FontWeight.bold : FontWeight.normal,
               color: isSelected || isToday
                   ? Colors.white
@@ -515,10 +584,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
           Text(
             lunarText,
             style: TextStyle(
-              fontSize: 9,
-              color: isSelected || isToday
-                  ? Colors.white.withValues(alpha: 0.8)
-                  : const Color(0xFF8A8F98),
+              fontSize: 10,
+              color: lunarColor,
             ),
           ),
         ],
