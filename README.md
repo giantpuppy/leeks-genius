@@ -1,17 +1,153 @@
-# paiqi_app
+# 🎭 排期助手 (Paiqi)
 
-A new Flutter project.
+> 面向戏剧/音乐剧爱好者的本地排期管理工具
 
-## Getting Started
+排期助手是一款专为**追剧的剧场人**打造的本地排期管理 App。核心解决多剧目场次分散、卡司组合复杂、手动记录繁琐的痛点，通过 **OCR 智能识别** + **可视化排期视图** + **卡司追踪**，一站式管理观剧计划。
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
+## ✨ 核心功能
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### 📸 OCR 智能识别
+拍照即识别，3 秒录入一场。支持排期表 / 卡司表两种格式，自动解析日期、角色、演员信息，并内置知识库自学习纠错。
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### 📅 多视图日历
+- **月历视图** — 全月排期一目了然，农历显示
+- **双周/周视图** — 快速查看近期安排
+- **年历视图** — 全年 12 月网格，状态色块标记
+- 支持手势滑动切换视图
+
+### 📊 剧场流排期（甘特图）
+- **3日/7日模式** — 双指缩放切换
+- 左侧剧目栏 + 右侧时间轴
+- 海报卡片封面，同剧多场纵向堆叠
+- 今天红色指示线，周末深色背景
+- 点击场次快速切换状态
+
+### 🎭 剧目管理
+- 添加剧目：表格录入 / OCR 识别 双模式
+- 单场详情：时间、座位、票价、卡司
+- 月度工作台：按月聚合所有剧目卡片
+- 演员选择器：搜索 + 手动新增
+
+### 👤 用户与数据
+- 本地账号系统（SHA256+盐）
+- 多用户隔离，每用户独立数据库
+- JSON 备份/恢复，数据自主可控
+- 观剧统计（想看/已买/已观演）
+
+---
+
+## 📱 界面预览
+
+| 日历视图 | 排期甘特图 | 月度工作台 |
+|---------|-----------|-----------|
+| 月历 + 年历弹窗 | 3日/7日时间轴 | 按月聚合剧目卡片 |
+
+<!-- 截图占位：建议补充实际运行截图 -->
+
+---
+
+## 🛠 技术栈
+
+| 层级 | 技术 | 说明 |
+|------|------|------|
+| 框架 | Flutter 3.x | 跨 Android / iOS / Web / Windows |
+| 语言 | Dart ≥3.0.0 | 空安全 |
+| UI | Material 3 | Spotify Dark 暗黑主题 |
+| 数据库 | sqflite | SQLite 本地存储 |
+| 日历 | table_calendar | 月/双周/周视图 |
+| 农历 | lunar | 农历计算 |
+| OCR | Google ML Kit / Tesseract.js / 百度 OCR | 移动端/Web端/云端三引擎 |
+| 图片 | image_picker | 相册/拍照 |
+
+---
+
+## 🚀 快速开始
+
+### 环境要求
+- Flutter SDK ≥3.0.0
+- Dart ≥3.0.0
+- Android SDK（如运行 Android 端）
+
+### 运行
+```bash
+# 克隆项目
+git clone https://github.com/giantpuppy/paiqi.git
+cd paiqi
+
+# 安装依赖
+flutter pub get
+
+# 运行（需连接设备或启动模拟器）
+flutter run
+```
+
+### 构建 APK
+```bash
+flutter build apk --release
+```
+
+---
+
+## 📁 项目结构
+
+```
+lib/
+├── main.dart                 # 入口
+├── database/
+│   ├── database_helper_io.dart   # 移动端数据库 (SQLite)
+│   └── database_helper_web.dart  # Web端数据库 (sembast)
+├── models/
+│   ├── show.dart             # 剧目模型
+│   ├── performance.dart      # 场次模型
+│   ├── cast_member.dart      # 卡司模型
+│   └── actor.dart            # 演员模型
+├── screens/
+│   ├── calendar_screen.dart      # 日历页
+│   ├── gantt_screen.dart         # 排期甘特图
+│   ├── add_show_screen.dart      # 添加/编辑剧目
+│   ├── monthly_workbench_screen.dart  # 月度工作台
+│   ├── profile_screen.dart       # 个人中心
+│   └── ...
+├── utils/
+│   ├── ocr_utils.dart        # OCR 识别与解析
+│   ├── ocr_knowledge_base.dart   # 知识库纠错
+│   └── cover_helper.dart     # 海报封面工具
+└── widgets/                  # 公共组件
+```
+
+---
+
+## 📋 开发状态
+
+| 模块 | 状态 |
+|------|------|
+| 用户系统 | ✅ 完成 |
+| 日历视图（月/双周/周/年） | ✅ 完成 |
+| 排期甘特图（3日/7日） | ✅ 完成 |
+| OCR 识别（双引擎） | ✅ 完成 |
+| 知识库纠错 | ✅ 完成 |
+| 月度工作台 | ✅ 完成 |
+| 数据备份/恢复 | ✅ 完成 |
+| 观演提醒 | ⏳ 待规划 |
+| 演员追踪 | ⏳ 待规划 |
+| 统计图表 | ⏳ 待规划 |
+
+---
+
+## 🗺 Roadmap
+
+- **近期**：UI/UX 持续打磨，体验优化
+- **中期**：观演提醒、演员追踪、统计图表
+- **长期**：数据同步（WebDAV/云端）、社区模板分享
+
+---
+
+## 📄 License
+
+本项目仅供个人学习使用。
+
+---
+
+> **做最懂戏剧爱好者的本地排期工具** 🎭
