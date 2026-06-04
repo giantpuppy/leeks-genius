@@ -3,12 +3,11 @@ import '../database/database_helper.dart';
 import '../models/show.dart';
 import '../models/performance.dart';
 import '../utils/page_transitions.dart';
-import '../utils/data_backup.dart';
 import '../models/actor.dart';
+import '../models/cast_member.dart';
 import '../services/user_service.dart';
 import 'add_show_screen.dart';
-import 'ocr_settings_screen.dart';
-import 'login_screen.dart';
+import 'settings_page.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -21,8 +20,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<Show> _shows = [];
   List<Performance> _performances = [];
   List<Actor> _actors = [];
+  List<CastMember> _castMembers = [];
   bool _isLoading = true;
   String? _currentUser;
+  bool _needsRefresh = true;
 
   int get _wantToSeeCount =>
       _performances.where((p) => p.status == 'want_to_see').length;
@@ -44,10 +45,113 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }).length;
   }
 
+  // ===== 画廊墙数据计算 =====
+
+  int get _totalSessions =>
+      _performances.where((p) => p.status == 'bought').length;
+
+  double get _totalPaid {
+    return _performances
+        .where((p) => p.status == 'bought')
+        .fold(0.0, (sum, p) => sum + (p.actualPrice ?? p.price ?? 0));
+  }
+
+  double get _faceValue {
+    return _performances
+        .where((p) => p.status == 'bought')
+        .fold(0.0, (sum, p) => sum + (p.price ?? 0));
+  }
+
+  double get _savedValue {
+    final diff = _faceValue - _totalPaid;
+    return diff > 0 ? diff : 0;
+  }
+
+  int get _showsTracked {
+    final boughtShowIds = _performances
+        .where((p) => p.status == 'bought')
+        .map((p) => p.showId)
+        .toSet();
+    return boughtShowIds.length;
+  }
+
+  List<MapEntry<String, int>> get _topCastCredits {
+    final boughtPerfIds = _performances
+        .where((p) => p.status == 'bought')
+        .map((p) => p.id)
+        .whereType<int>()
+        .toSet();
+
+    final counts = <String, int>{};
+    for (final cm in _castMembers) {
+      if (boughtPerfIds.contains(cm.performanceId)) {
+        counts[cm.actorName] = (counts[cm.actorName] ?? 0) + 1;
+      }
+    }
+    final sorted = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return sorted.take(3).toList();
+  }
+
+  String get _dotMatrix {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final boughtDates = <String>{};
+    for (final p in _performances) {
+      if (p.status == 'bought') boughtDates.add(p.date);
+    }
+
+    final buffer = StringBuffer();
+    for (int i = 29; i >= 0; i--) {
+      final date = today.subtract(Duration(days: i));
+      final dateStr =
+          '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+      buffer.write(boughtDates.contains(dateStr) ? '●' : '·');
+      if (i % 10 == 0 && i != 0) buffer.write('\n');
+    }
+    return buffer.toString();
+  }
+
+  String _formatCurrency(double value) {
+    if (value == 0) return '0';
+    final s = value.toStringAsFixed(0);
+    final buffer = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) {
+        buffer.write(',');
+      }
+      buffer.write(s[i]);
+    }
+    return buffer.toString();
+  }
+
+  static const TextStyle _monoLabel = TextStyle(
+    fontSize: 12,
+    fontFamily: 'monospace',
+    color: Color(0xFF8A8F98),
+    letterSpacing: 0.5,
+  );
+
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_needsRefresh) {
+      _needsRefresh = false;
+      _loadData();
+    }
+  }
+
+  @override
+  void deactivate() {
+    _needsRefresh = true;
+    super.deactivate();
   }
 
   Future<void> _loadData() async {
@@ -55,12 +159,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final shows = await db.getAllShows();
     final performances = await db.getAllPerformances();
     final actors = await db.getAllActors();
+    final castMembers = await db.getAllCastMembers();
     final currentUser = await UserService.getCurrentUsername();
 
     setState(() {
       _shows = shows;
       _performances = performances;
       _actors = actors;
+      _castMembers = castMembers;
       _currentUser = currentUser;
       _isLoading = false;
     });
@@ -131,401 +237,275 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('我的'),
-        foregroundColor: Colors.white,
-      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : CustomScrollView(
               slivers: [
-                // 用户信息
+                // 新顶栏：大字标题 + 头像入口
                 SliverToBoxAdapter(
-                  child: _buildUserHeader(),
+                  child: _buildHeader(),
                 ),
-                // 统计卡片
+                // 画廊墙：非对称数据视觉流
                 SliverToBoxAdapter(
-                  child: _buildStatsSection(),
+                  child: _buildGalleryWall(),
                 ),
-                // 即将演出
-                if (_upcomingCount > 0)
-                  SliverToBoxAdapter(
-                    child: _buildUpcomingSection(),
-                  ),
-                // 管理入口
+                // 底部资产入口
                 SliverToBoxAdapter(
-                  child: _buildManagementSection(),
+                  child: _buildAssetSection(),
+                ),
+                // 底部安全区
+                const SliverToBoxAdapter(
+                  child: SizedBox(height: 32),
                 ),
               ],
             ),
     );
   }
 
-  Widget _buildUserHeader() {
+  Widget _buildHeader() {
     final displayName = _currentUser ?? '未登录';
-    final isLoggedIn = _currentUser != null;
+    final statusBarHeight = MediaQuery.of(context).padding.top;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: EdgeInsets.fromLTRB(24, statusBarHeight + 16, 24, 0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          CircleAvatar(
-            radius: 28,
-            backgroundColor: const Color(0xFF6B5BCD).withValues(alpha: 0.2),
-            child: Text(
-              displayName.substring(0, 1).toUpperCase(),
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF6B5BCD),
+          const Spacer(),
+          // 右侧头像入口
+          GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              SlideFadeRoute(page: const SettingsPage()),
+            ),
+            child: CircleAvatar(
+              radius: 20,
+              backgroundColor: const Color(0xFF6B5BCD).withValues(alpha: 0.2),
+              child: Text(
+                displayName.substring(0, 1).toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF6B5BCD),
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  displayName,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  isLoggedIn ? '已登录用户' : '本地使用',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF8A8F98),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          TextButton.icon(
-            onPressed: _switchUser,
-            icon: const Icon(Icons.swap_horiz, size: 18),
-            label: const Text('切换'),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _switchUser() async {
-    await UserService.logout();
-    if (mounted) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (_) => false,
-      );
-    }
-  }
-
-  Widget _buildStatsSection() {
+  Widget _buildGalleryWall() {
+    final primaryColor = Theme.of(context).colorScheme.primary;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Row(
-        children: [
-          _buildStatCard(
-            label: '想看',
-            value: '$_wantToSeeCount',
-            color: const Color(0xFF811FE2),
-            icon: Icons.star_border,
-          ),
-          const SizedBox(width: 12),
-          _buildStatCard(
-            label: '已买',
-            value: '$_boughtCount',
-            color: const Color(0xFF34D399),
-            icon: Icons.check_circle_outline,
-          ),
-          const SizedBox(width: 12),
-          _buildStatCard(
-            label: '即将演出',
-            value: '$_upcomingCount',
-            color: const Color(0xFFF54A45),
-            icon: Icons.access_time,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatCard({
-    required String label,
-    required String value,
-    required Color color,
-    required IconData icon,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.2)),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: color.withValues(alpha: 0.8),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildUpcomingSection() {
-    final now = DateTime.now();
-    final upcoming = _performances.where((p) {
-      if (p.status != 'bought') return false;
-      try {
-        final date = DateTime.parse(p.date);
-        return date.isAfter(now) &&
-            date.isBefore(now.add(const Duration(days: 7)));
-      } catch (_) {
-        return false;
-      }
-    }).toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Text(
-            '未来7天',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        ...upcoming.map((perf) {
-          final show = _shows.firstWhere(
-            (s) => s.id == perf.showId,
-            orElse: () => Show(name: '未知'),
-          );
-          final date = DateTime.parse(perf.date);
-          final weekday = ['一', '二', '三', '四', '五', '六', '日'];
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF34D399).withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: const Color(0xFF34D399).withValues(alpha: 0.2),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF34D399).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          '${date.month}/${date.day}',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF34D399),
-                          ),
-                        ),
-                        Text(
-                          '周${weekday[date.weekday - 1]}',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: const Color(0xFF34D399).withValues(alpha: 0.7),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          show.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${perf.time?.substring(0, 5) ?? ''}  ${show.theater ?? ''}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: const Color(0xFFB3B3B3),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (perf.seat != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF34D399).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        perf.seat!,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF34D399),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget _buildManagementSection() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '管理',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
+          const SizedBox(height: 32),
+          // ===== 第一排：左高右低 =====
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 左栏：场次痕迹
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('SESSIONS', style: _monoLabel),
+                    const SizedBox(height: 8),
+                    Text(
+                      '$_totalSessions',
+                      style: const TextStyle(
+                        fontSize: 54,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'monospace',
+                        height: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // 微点阵
+                    Text(
+                      _dotMatrix,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        height: 1.4,
+                        color: primaryColor.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 右栏：票房账本
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('TOTAL PAID', style: _monoLabel),
+                    const SizedBox(height: 8),
+                    Text(
+                      '¥${_formatCurrency(_totalPaid)}',
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'FACE VALUE: ¥${_formatCurrency(_faceValue)}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF8A8F98),
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'SAVED VALUE: ¥${_formatCurrency(_savedValue)}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF8A8F98),
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          _buildManageCard(
+          // ===== 艺术感非对称分割线 =====
+          const Divider(
+            thickness: 1,
+            height: 48,
+            color: Colors.white10,
+            endIndent: 120.0,
+          ),
+          // ===== 第二排：左低右高 =====
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 左栏：打卡剧目
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('SHOWS', style: _monoLabel),
+                    const SizedBox(height: 8),
+                    Text(
+                      '$_showsTracked',
+                      style: const TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'monospace',
+                        height: 1.0,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 右栏：因缘职员表
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('CAST CREDITS', style: _monoLabel),
+                    const SizedBox(height: 12),
+                    if (_topCastCredits.isEmpty)
+                      const Text(
+                        '暂无数据',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF8A8F98),
+                          fontFamily: 'monospace',
+                          height: 2.0,
+                        ),
+                      )
+                    else
+                      ..._topCastCredits.map((entry) => Text(
+                        '${entry.key} × ${entry.value}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          height: 2.0,
+                        ),
+                      )),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          // ===== 衔接底部资产清单 =====
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssetSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 16),
+          _buildAssetTile(
             icon: Icons.theaters,
-            title: '我的剧目',
-            subtitle: '${_shows.length} 部',
+            label: '我的剧目',
+            count: _shows.length,
             onTap: () => _showShowsSheet(),
           ),
-          const SizedBox(height: 8),
-          _buildManageCard(
+          const Divider(
+            height: 1,
+            indent: 48,
+            color: Color(0xFF2A2A2A),
+          ),
+          _buildAssetTile(
             icon: Icons.people,
-            title: '演员名单',
-            subtitle: '${_actors.length} 人',
+            label: '演员名单',
+            count: _actors.length,
             onTap: () => _showActorsSheet(),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            '设置',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildManageCard(
-            icon: Icons.document_scanner,
-            title: 'OCR 识别设置',
-            subtitle: '配置百度 OCR API Key',
-            onTap: () => Navigator.push(
-              context,
-              SlideFadeRoute(page: const OcrSettingsScreen()),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            '数据',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildManageCard(
-            icon: Icons.download,
-            title: '导出备份',
-            subtitle: 'JSON 格式',
-            onTap: () async {
-              await DataBackup.exportToJson();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('备份已下载')),
-                );
-              }
-            },
-          ),
-          const SizedBox(height: 8),
-          _buildManageCard(
-            icon: Icons.upload,
-            title: '导入恢复',
-            subtitle: '选择 JSON 备份文件',
-            onTap: () async {
-              final result = await DataBackup.importFromJson();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(result ?? '已取消')),
-                );
-                _loadData();
-              }
-            },
           ),
         ],
       ),
     );
   }
 
-  Widget _buildManageCard({
+  Widget _buildAssetTile({
     required IconData icon,
-    required String title,
-    required String subtitle,
+    required String label,
+    required int count,
     required VoidCallback onTap,
   }) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: const BorderSide(color: Color(0xFF2A2A2A)),
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+      leading: Icon(
+        icon,
+        size: 20,
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.8),
       ),
-      child: ListTile(
-        leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-        title: Text(title),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.chevron_right, color: Color(0xFF8A8F98)),
-        onTap: onTap,
+      title: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+        ),
       ),
+      subtitle: Text(
+        '$count 项',
+        style: const TextStyle(
+          fontSize: 12,
+          color: Color(0xFF8A8F98),
+        ),
+      ),
+      trailing: const Icon(
+        Icons.chevron_right,
+        size: 18,
+        color: Color(0xFF8A8F98),
+      ),
+      onTap: onTap,
     );
   }
 
