@@ -984,11 +984,12 @@ class _AddShowScreenState extends State<AddShowScreen> {
                               decoration: const InputDecoration(
                                 hintText: '角色',
                                 isDense: true,
+                                isCollapsed: true,
                                 border: InputBorder.none,
                                 enabledBorder: InputBorder.none,
                                 focusedBorder: InputBorder.none,
                                 filled: false,
-                                contentPadding: EdgeInsets.symmetric(horizontal: 4),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                               ),
                               style: const TextStyle(
                                 fontSize: 12,
@@ -1035,11 +1036,12 @@ class _AddShowScreenState extends State<AddShowScreen> {
                             decoration: InputDecoration(
                               hintText: '-',
                               isDense: true,
+                              isCollapsed: true,
                               border: InputBorder.none,
                               enabledBorder: InputBorder.none,
                               focusedBorder: InputBorder.none,
                               filled: false,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                               hintStyle: TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey[600],

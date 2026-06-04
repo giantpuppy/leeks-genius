@@ -14,6 +14,8 @@
 | 2026/06/04 | 个人中心画廊墙：总场次、总花费、票面价、省钱额、追踪剧目数、Top3 演员 | `profile_screen.dart` |
 | 2026/06/04 | 设置页拆分：OCR 配置、备份恢复、退出登录独立为 `SettingsPage` | `settings_page.dart`, `profile_screen.dart` |
 | 2026/06/04 | 修复 AddShowScreen 表头 Row 溢出 0.5px（像素舍入 + border 宽度） | `add_show_screen.dart` |
+| 2026/06/04 | 修复演员角色单元格垂直对齐（isCollapsed + contentPadding） | `add_show_screen.dart` |
+| 2026/06/04 | 待规划：个人中心+设置页合并为单一页面 | `profile_screen.dart`, `settings_page.dart` |
 | 2026/06/03 | 月度管理工作台：按月聚合剧目卡片、场次列表、点击进入编辑，保存后自动刷新 | `monthly_workbench_screen.dart`, `database_helper_io.dart` |
 | 2026/06/03 | 甘特图模式切换修复：ValueKey 强制重建 + _justSwitched 防干扰 + postFrame 重算行高，左上角月份实时跟随滚动 | `gantt_screen.dart` |
 | 2026/06/02 | 排期页重构为"剧场流时间轴"：双指缩放切换 3天/7天视图、海报卡片、Sticky Header、+号分流弹窗 | `gantt_screen.dart` |
@@ -357,6 +359,7 @@ class Actor {
 | 演出提醒 | ⏳ 待规划 | 通知推送 |
 | 演员追踪 | ⏳ 待规划 | 演员出场提醒 |
 | 统计图表 | ⏳ 待规划 | 观剧数据可视化 |
+| **个人中心+设置页合并** | ⏳ 待规划 | 将 ProfileScreen（管理页）与 SettingsPage 合并为单一页面，减少跳转层级 |
 
 ---
 
