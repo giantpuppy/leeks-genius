@@ -93,7 +93,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
     }
   }
 
-  Future<void> _loadEventsForMonth(DateTime month) async {
+  Future<void> _loadEventsForMonth(DateTime month, {bool merge = false}) async {
     final startOfMonth = DateTime(month.year, month.month, 1);
     final endOfMonth = DateTime(month.year, month.month + 1, 0);
 
@@ -116,7 +116,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
     }
 
     setState(() {
-      _events = events;
+      if (merge) {
+        _events.addAll(events);
+      } else {
+        _events = events;
+      }
     });
     _notifySelectedDayHasEvent();
   }
@@ -236,12 +240,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
     return (screenWidth * 0.22).clamp(80.0, 120.0);
   }
 
-  double _calculateMonthRowHeight(BuildContext context,
-      {required double maxHeight}) {
-    // 月历总高度按 8 倍行高设计：6 行网格 + 2 行余量给 TableCalendar 内部边距
-    return maxHeight / 8;
-  }
-
   void _onDaySelected(DateTime selectedDay, {bool fromUser = true}) {
     if (fromUser) {
       HapticFeedback.lightImpact();
@@ -259,15 +257,69 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   void _onHeaderHorizontalSwipe(DragEndDetails details) {
     if (details.primaryVelocity == null) return;
-    if (details.primaryVelocity! > 50) {
-      // 右滑：上一月
-      HapticFeedback.lightImpact();
-      _changeMonth(-1);
-    } else if (details.primaryVelocity! < -50) {
-      // 左滑：下一月
-      HapticFeedback.lightImpact();
-      _changeMonth(1);
+
+    if (_calendarFormat == CalendarFormat.week) {
+      // 周视图：左右滑动切换周目
+      if (details.primaryVelocity! > 50) {
+        HapticFeedback.lightImpact();
+        _changeWeek(-1);
+      } else if (details.primaryVelocity! < -50) {
+        HapticFeedback.lightImpact();
+        _changeWeek(1);
+      }
+    } else {
+      // 月视图：左右滑动切换月份
+      if (details.primaryVelocity! > 50) {
+        HapticFeedback.lightImpact();
+        _changeMonth(-1);
+      } else if (details.primaryVelocity! < -50) {
+        HapticFeedback.lightImpact();
+        _changeMonth(1);
+      }
     }
+  }
+
+  void _changeWeek(int delta) {
+    final newFocusedDay = _focusedDay.add(Duration(days: 7 * delta));
+
+    // 保持选中日期的星期几不变，平移到新周
+    DateTime? newSelectedDay = _selectedDay;
+    if (_selectedDay != null) {
+      final focusedWeekday = _selectedDay!.weekday % 7;
+      final newWeekStart = newFocusedDay.subtract(
+        Duration(days: newFocusedDay.weekday % 7),
+      );
+      newSelectedDay = newWeekStart.add(Duration(days: focusedWeekday));
+    }
+
+    setState(() {
+      _focusedDay = newFocusedDay;
+      if (newSelectedDay != null) {
+        _selectedDay = newSelectedDay;
+      }
+    });
+
+    _loadEventsForMonth(newFocusedDay, merge: true);
+
+    // 周视图可能跨月，确保相邻月份事件也加载
+    final weekStart = newFocusedDay.subtract(
+      Duration(days: newFocusedDay.weekday % 7),
+    );
+    final weekEnd = weekStart.add(const Duration(days: 6));
+    if (weekStart.month != newFocusedDay.month ||
+        weekStart.year != newFocusedDay.year) {
+      _loadEventsForMonth(weekStart, merge: true);
+    }
+    if ((weekEnd.month != newFocusedDay.month ||
+            weekEnd.year != newFocusedDay.year) &&
+        !isSameDay(weekEnd, weekStart)) {
+      _loadEventsForMonth(weekEnd, merge: true);
+    }
+
+    if (newSelectedDay != null) {
+      _loadPerformancesForDate(newSelectedDay);
+    }
+    _notifySelectedDayHasEvent();
   }
 
   void _changeMonth(int delta) {
@@ -292,14 +344,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
     const appBarHeight = kToolbarHeight;
     final weekdayHeaderHeight = screenSize.width * 0.085;
     final focusedRowHeight = _focusedRowHeight(context);
+    final monthRowHeight = focusedRowHeight;
     final availableHeight = screenSize.height -
         statusBarHeight -
         appBarHeight -
         weekdayHeaderHeight;
-    // 展开状态：以周视图行高为基准，月历高度 ≈ 7.5 倍行高，
-    // 让月视图每个单元格高度与周视图接近，同时不超过可用高度的 90%
-    final expandedCalendarHeight =
-        min(focusedRowHeight * 7.5, availableHeight * 0.9);
+    // 展开状态：6 行月历 + 分割线/手柄/预览区余量，确保至少能显示完整 6 行
+    final expandedCalendarHeight = max(
+      monthRowHeight * 6,
+      min(
+        monthRowHeight * 6 + screenSize.width * 0.16,
+        availableHeight * 0.9,
+      ),
+    );
     final calendarHeight =
         _isCalendarExpanded ? expandedCalendarHeight : focusedRowHeight;
 
@@ -351,115 +408,151 @@ class _CalendarScreenState extends State<CalendarScreen> {
           SliverToBoxAdapter(
             child: SizedBox(
               height: calendarHeight,
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onVerticalDragEnd: _onVerticalSwipe,
-                onHorizontalDragEnd: _onHeaderHorizontalSwipe,
-                onTap: _isCalendarExpanded ? null : _expandCalendar,
-                child: ClipRect(
-                  child: TableCalendar(
-                    firstDay: DateTime(2020),
-                  lastDay: DateTime(2030),
-                  focusedDay: displayFocusedDay,
-                  selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-                  calendarFormat: _calendarFormat,
-                  availableCalendarFormats: const {
-                    CalendarFormat.month: '月',
-                    CalendarFormat.week: '周',
-                  },
-                  availableGestures: AvailableGestures.none,
-                  rowHeight: _isCalendarExpanded
-                      ? _calculateMonthRowHeight(context,
-                          maxHeight: calendarHeight)
-                      : calendarHeight,
-                  eventLoader: (day) {
-                    final normalized = DateTime(day.year, day.month, day.day);
-                    return _events[normalized] ?? [];
-                  },
-                  onDaySelected: (selectedDay, focusedDay) {
-                    _onDaySelected(selectedDay);
-                  },
-                  onPageChanged: (focusedDay) {
-                    setState(() => _focusedDay = focusedDay);
-                    _loadEventsForMonth(focusedDay);
-                  },
-                  onFormatChanged: (format) {
-                    setState(() {
-                      _calendarFormat = format;
-                      _focusedDay = _selectedDay ?? _focusedDay;
-                    });
-                  },
-                  calendarBuilders: CalendarBuilders(
-                    dowBuilder: (context, day) => const SizedBox.shrink(),
-                    markerBuilder: (context, date, events) {
-                      // 海报单元格通过海报边框/渐变占位表达状态，不再显示底部圆点
-                      return const SizedBox.shrink();
-                    },
-                    // 显示农历
-                    defaultBuilder: (context, day, focusedDay) {
-                      final normalized = DateTime(day.year, day.month, day.day);
-                      return CalendarCell(
-                        day: day,
-                        isToday: false,
-                        isSelected: false,
-                        events: _events[normalized] ?? [],
-                      );
-                    },
-                    todayBuilder: (context, day, focusedDay) {
-                      final normalized = DateTime(day.year, day.month, day.day);
-                      return CalendarCell(
-                        day: day,
-                        isToday: true,
-                        isSelected: false,
-                        events: _events[normalized] ?? [],
-                      );
-                    },
-                    selectedBuilder: (context, day, focusedDay) {
-                      final normalized = DateTime(day.year, day.month, day.day);
-                      return CalendarCell(
-                        day: day,
-                        isToday: isSameDay(day, DateTime.now()),
-                        isSelected: true,
-                        events: _events[normalized] ?? [],
-                      );
-                    },
-                    outsideBuilder: (context, day, focusedDay) {
-                      if (_calendarFormat == CalendarFormat.month) {
-                        return const SizedBox.shrink();
-                      }
-                      final normalized = DateTime(day.year, day.month, day.day);
-                      return CalendarCell(
-                        day: day,
-                        isToday: false,
-                        isSelected: false,
-                        isOutside: true,
-                        events: _events[normalized] ?? [],
-                      );
-                    },
-                    disabledBuilder: (context, day, focusedDay) =>
-                        const SizedBox.shrink(),
+              child: Stack(
+                children: [
+                  GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onVerticalDragEnd: _onVerticalSwipe,
+                    onHorizontalDragEnd: _onHeaderHorizontalSwipe,
+                    onTap: _isCalendarExpanded ? null : _expandCalendar,
+                    child: ClipRect(
+                      child: TableCalendar(
+                        firstDay: DateTime(2020),
+                        lastDay: DateTime(2030),
+                        focusedDay: displayFocusedDay,
+                        selectedDayPredicate: (day) =>
+                            isSameDay(_selectedDay, day),
+                        calendarFormat: _calendarFormat,
+                        availableCalendarFormats: const {
+                          CalendarFormat.month: '月',
+                          CalendarFormat.week: '周',
+                        },
+                        availableGestures: AvailableGestures.none,
+                        rowHeight: _isCalendarExpanded
+                            ? monthRowHeight
+                            : calendarHeight,
+                        eventLoader: (day) {
+                          final normalized =
+                              DateTime(day.year, day.month, day.day);
+                          return _events[normalized] ?? [];
+                        },
+                        onDaySelected: (selectedDay, focusedDay) {
+                          _onDaySelected(selectedDay);
+                        },
+                        onPageChanged: (focusedDay) {
+                          setState(() => _focusedDay = focusedDay);
+                          _loadEventsForMonth(focusedDay);
+                        },
+                        onFormatChanged: (format) {
+                          setState(() {
+                            _calendarFormat = format;
+                            _focusedDay = _selectedDay ?? _focusedDay;
+                          });
+                        },
+                        calendarBuilders: CalendarBuilders(
+                          dowBuilder: (context, day) => const SizedBox.shrink(),
+                          markerBuilder: (context, date, events) {
+                            // 海报单元格通过海报边框/渐变占位表达状态，不再显示底部圆点
+                            return const SizedBox.shrink();
+                          },
+                          // 显示农历
+                          defaultBuilder: (context, day, focusedDay) {
+                            final normalized =
+                                DateTime(day.year, day.month, day.day);
+                            return CalendarCell(
+                              day: day,
+                              isToday: false,
+                              isSelected: false,
+                              events: _events[normalized] ?? [],
+                            );
+                          },
+                          todayBuilder: (context, day, focusedDay) {
+                            final normalized =
+                                DateTime(day.year, day.month, day.day);
+                            return CalendarCell(
+                              day: day,
+                              isToday: true,
+                              isSelected: false,
+                              events: _events[normalized] ?? [],
+                            );
+                          },
+                          selectedBuilder: (context, day, focusedDay) {
+                            final normalized =
+                                DateTime(day.year, day.month, day.day);
+                            return CalendarCell(
+                              day: day,
+                              isToday: isSameDay(day, DateTime.now()),
+                              isSelected: true,
+                              events: _events[normalized] ?? [],
+                            );
+                          },
+                          outsideBuilder: (context, day, focusedDay) {
+                            if (_calendarFormat == CalendarFormat.month) {
+                              return const SizedBox.shrink();
+                            }
+                            final normalized =
+                                DateTime(day.year, day.month, day.day);
+                            return CalendarCell(
+                              day: day,
+                              isToday: false,
+                              isSelected: false,
+                              isOutside: true,
+                              events: _events[normalized] ?? [],
+                            );
+                          },
+                          disabledBuilder: (context, day, focusedDay) =>
+                              const SizedBox.shrink(),
+                        ),
+                        calendarStyle: CalendarStyle(
+                          cellMargin: const EdgeInsets.all(2),
+                          markerSize: 6,
+                          markersMaxCount: 3,
+                          outsideDaysVisible:
+                              _calendarFormat != CalendarFormat.month,
+                          defaultTextStyle:
+                              const TextStyle(color: Colors.white),
+                          weekendTextStyle:
+                              const TextStyle(color: Color(0xFFB3B3B3)),
+                          outsideTextStyle:
+                              const TextStyle(color: Color(0xFF444444)),
+                          // today/selected 样式完全由 custom builder 控制
+                        ),
+                        daysOfWeekHeight: 0,
+                        startingDayOfWeek: StartingDayOfWeek.monday,
+                        headerVisible: false,
+                        locale: 'zh_CN',
+                        sixWeekMonthsEnforced: true,
+                        formatAnimationDuration:
+                            const Duration(milliseconds: 1),
+                        formatAnimationCurve: Curves.linear,
+                      ),
+                    ),
                   ),
-                  calendarStyle: CalendarStyle(
-                    cellMargin: const EdgeInsets.all(2),
-                    markerSize: 6,
-                    markersMaxCount: 3,
-                    outsideDaysVisible: _calendarFormat != CalendarFormat.month,
-                    defaultTextStyle: const TextStyle(color: Colors.white),
-                    weekendTextStyle: const TextStyle(color: Color(0xFFB3B3B3)),
-                    outsideTextStyle: const TextStyle(color: Color(0xFF444444)),
-                    // today/selected 样式完全由 custom builder 控制
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: _isCalendarExpanded ? monthRowHeight * 0.5 : 0,
+                    child: IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Theme.of(context)
+                                  .scaffoldBackgroundColor
+                                  .withValues(alpha: 0.85),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                  daysOfWeekHeight: 0,
-                  startingDayOfWeek: StartingDayOfWeek.monday,
-                  headerVisible: false,
-                  locale: 'zh_CN',
-                  sixWeekMonthsEnforced: true,
-                  formatAnimationDuration: const Duration(milliseconds: 1),
-                  formatAnimationCurve: Curves.linear,
-                ),
+                ],
               ),
             ),
-          ),
           ),
 
           // 分割条（胶囊形拖拽手柄 + 淡淡光线）
@@ -481,8 +574,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   return Column(
                     children: [
                       Container(
-                        height: screenWidth *
-                            (hasSelectedEvent ? 0.008 : 0.004),
+                        height:
+                            screenWidth * (hasSelectedEvent ? 0.008 : 0.004),
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.centerLeft,
@@ -507,9 +600,24 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           ],
                         ),
                       ),
+                      // 向下的柔和过渡，与票根列表暗色背景融合
+                      Container(
+                        height: screenWidth * 0.03,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              primaryColor.withValues(
+                                  alpha: hasSelectedEvent ? 0.12 : 0.04),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                      ),
                       Padding(
-                        padding: EdgeInsets.symmetric(
-                            vertical: screenWidth * 0.015),
+                        padding:
+                            EdgeInsets.symmetric(vertical: screenWidth * 0.01),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
                           width: screenWidth * 0.10,
@@ -518,7 +626,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             color: _calendarFormat == CalendarFormat.month
                                 ? const Color(0xFF6B5BCD)
                                 : const Color(0xFF8A8F98),
-                            borderRadius: BorderRadius.circular(screenWidth * 0.005),
+                            borderRadius:
+                                BorderRadius.circular(screenWidth * 0.005),
                           ),
                         ),
                       ),
@@ -705,8 +814,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           Row(
                             children: [
                               Icon(Icons.calendar_today,
-                                  size: dateFontSize * 1.1,
-                                  color: statusColor),
+                                  size: dateFontSize * 1.1, color: statusColor),
                               SizedBox(width: maxW * 0.01),
                               Flexible(
                                 child: Text(
