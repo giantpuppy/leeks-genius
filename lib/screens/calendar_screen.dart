@@ -349,11 +349,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
         statusBarHeight -
         appBarHeight -
         weekdayHeaderHeight;
-    // 展开状态：6 行月历 + 分割线/手柄/预览区余量，确保至少能显示完整 6 行
+    // 展开状态：6 行月历 + 分割线/手柄区余量，让分割线紧贴第六排下方
+    final dividerAreaHeight = screenSize.width * 0.075;
     final expandedCalendarHeight = max(
       monthRowHeight * 6,
       min(
-        monthRowHeight * 6 + screenSize.width * 0.16,
+        monthRowHeight * 6 + dividerAreaHeight,
         availableHeight * 0.9,
       ),
     );
