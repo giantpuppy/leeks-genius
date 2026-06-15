@@ -3,15 +3,15 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:lunar/lunar.dart';
 import 'package:table_calendar/table_calendar.dart';
 import '../database/database_helper.dart';
 import '../utils/page_transitions.dart';
+import '../utils/status_colors.dart' as status_colors;
 import '../widgets/animated_list_item.dart';
 import '../widgets/breathing_icon.dart';
+import '../widgets/calendar/calendar_cell.dart';
 import '../widgets/status_dot.dart';
 import '../widgets/ticket_clipper.dart';
-import '../widgets/today_spotlight.dart';
 import 'unified_show_detail_screen.dart';
 import 'year_calendar_screen.dart';
 
@@ -54,7 +54,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Map<DateTime, List<Map<String, dynamic>>> _events = {};
   bool _isLoading = false;
   bool _isCalendarExpanded = true;
-  final Map<DateTime, int> _posterRotationIndex = {};
 
   final DateFormat _dateFormat = DateFormat('yyyy-MM-dd');
   final DateFormat _displayFormat = DateFormat('yyyy年M月');
@@ -243,7 +242,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
     return maxHeight / 8;
   }
 
-  void _onDaySelected(DateTime selectedDay) {
+  void _onDaySelected(DateTime selectedDay, {bool fromUser = true}) {
+    if (fromUser) {
+      HapticFeedback.lightImpact();
+    }
     setState(() {
       _selectedDay = selectedDay;
       _focusedDay = selectedDay;
@@ -281,22 +283,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
     _loadEventsForMonth(newMonth);
     _loadPerformancesForDate(newMonth);
     _notifySelectedDayHasEvent();
-  }
-
-  Color _statusColor(String status) {
-    return switch (status) {
-      'want_to_see' => const Color(0xFF811FE2),
-      'watched' => const Color(0xFFD4A853),
-      _ => const Color(0xFF34D399),
-    };
-  }
-
-  IconData _statusIcon(String status) {
-    return switch (status) {
-      'want_to_see' => Icons.star_border,
-      'watched' => Icons.visibility_outlined,
-      _ => Icons.check_circle,
-    };
   }
 
   @override
@@ -412,28 +398,28 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     // 显示农历
                     defaultBuilder: (context, day, focusedDay) {
                       final normalized = DateTime(day.year, day.month, day.day);
-                      return _buildCalendarCell(
-                        day,
-                        false,
-                        false,
+                      return CalendarCell(
+                        day: day,
+                        isToday: false,
+                        isSelected: false,
                         events: _events[normalized] ?? [],
                       );
                     },
                     todayBuilder: (context, day, focusedDay) {
                       final normalized = DateTime(day.year, day.month, day.day);
-                      return _buildCalendarCell(
-                        day,
-                        true,
-                        false,
+                      return CalendarCell(
+                        day: day,
+                        isToday: true,
+                        isSelected: false,
                         events: _events[normalized] ?? [],
                       );
                     },
                     selectedBuilder: (context, day, focusedDay) {
                       final normalized = DateTime(day.year, day.month, day.day);
-                      return _buildCalendarCell(
-                        day,
-                        isSameDay(day, DateTime.now()),
-                        true,
+                      return CalendarCell(
+                        day: day,
+                        isToday: isSameDay(day, DateTime.now()),
+                        isSelected: true,
                         events: _events[normalized] ?? [],
                       );
                     },
@@ -442,10 +428,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         return const SizedBox.shrink();
                       }
                       final normalized = DateTime(day.year, day.month, day.day);
-                      return _buildCalendarCell(
-                        day,
-                        false,
-                        false,
+                      return CalendarCell(
+                        day: day,
+                        isToday: false,
+                        isSelected: false,
                         isOutside: true,
                         events: _events[normalized] ?? [],
                       );
@@ -468,6 +454,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   headerVisible: false,
                   locale: 'zh_CN',
                   sixWeekMonthsEnforced: true,
+                  formatAnimationDuration: const Duration(milliseconds: 1),
+                  formatAnimationCurve: Curves.linear,
                 ),
               ),
             ),
@@ -583,7 +571,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           final perf = _performances[index];
                           final status =
                               perf['status'] as String? ?? 'unmarked';
-                          final statusColor = _statusColor(status);
+                          final statusColor = status_colors.statusColor(status);
                           final coverPath = perf['cover_path'] as String?;
 
                           return AnimatedListItem(
@@ -786,7 +774,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   SizedBox(
                     width: statusAreaWidth,
                     child: Center(
-                      child: Icon(_statusIcon(status),
+                      child: Icon(status_colors.statusIcon(status),
                           size: statusIconSize, color: statusColor),
                     ),
                   ),
@@ -797,336 +785,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
         );
       },
     );
-  }
-
-  // 日历单元格（带农历 + 海报）
-  Widget _buildCalendarCell(
-    DateTime day,
-    bool isToday,
-    bool isSelected, {
-    bool isOutside = false,
-    List<Map<String, dynamic>> events = const [],
-  }) {
-    final lunar = Lunar.fromDate(day);
-    final lunarDay = lunar.getDayInChinese();
-    final lunarText =
-        lunarDay == '初一' ? '${lunar.getMonthInChinese()}月' : lunarDay;
-
-    if (isOutside) {
-      return const SizedBox.shrink();
-    }
-
-    final normalizedDay = DateTime(day.year, day.month, day.day);
-    final dayEvents =
-        events.isNotEmpty ? events : (_events[normalizedDay] ?? []);
-    final hasEvents = dayEvents.isNotEmpty;
-
-    final textColor = day.weekday >= 6 ? const Color(0xFFB3B3B3) : Colors.white;
-
-    // 无事件：传统数字单元格
-    if (!hasEvents) {
-      final primaryColor = Theme.of(context).colorScheme.primary;
-      final cell = Container(
-        margin: const EdgeInsets.all(2),
-        alignment: Alignment.center,
-        decoration: isSelected
-            ? BoxDecoration(
-                border: Border.all(
-                  color: primaryColor.withValues(alpha: 0.5),
-                  width: 1,
-                ),
-                color: primaryColor.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(4),
-                boxShadow: [
-                  BoxShadow(
-                    color: primaryColor.withValues(alpha: 0.2),
-                    blurRadius: 10,
-                    spreadRadius: 0,
-                  ),
-                ],
-              )
-            : null,
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.center,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text(
-                '${day.day}',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: isToday || isSelected
-                      ? FontWeight.bold
-                      : FontWeight.normal,
-                  color: isSelected
-                      ? Colors.white
-                      : (isToday
-                          ? primaryColor
-                          : textColor),
-                ),
-              ),
-              Text(
-                lunarText,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: isSelected
-                      ? Colors.white.withValues(alpha: 0.8)
-                      : (isToday
-                          ? primaryColor.withValues(alpha: 0.7)
-                          : const Color(0xFF8A8F98)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-
-      return cell;
-    }
-
-    // 有事件：海报单元格
-    return _buildPosterCell(day, dayEvents, isToday, isSelected,
-        isOutside: isOutside);
-  }
-
-  Widget _buildPosterFallback(String showName, Color color) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            color.withValues(alpha: 0.35),
-            color.withValues(alpha: 0.1),
-          ],
-        ),
-      ),
-      child: Center(
-        child: Text(
-          showName.length >= 2 ? showName.substring(0, 2) : showName,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-          textAlign: TextAlign.center,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPosterCell(
-    DateTime day,
-    List<Map<String, dynamic>> events,
-    bool isToday,
-    bool isSelected, {
-    bool isOutside = false,
-  }) {
-    final showCount = events.length;
-    final normalizedDay = DateTime(day.year, day.month, day.day);
-    final currentIndex = _posterRotationIndex[normalizedDay] ?? 0;
-    final safeIndex = currentIndex % showCount;
-
-    Widget posterThumbnail(
-      Map<String, dynamic> event, {
-      bool topmost = false,
-      bool dimmed = false,
-    }) {
-      final status = event['status'] as String? ?? 'unmarked';
-      final color = _statusColor(status);
-      final coverPath = event['cover_path'] as String?;
-      final showName = event['show_name'] as String? ?? '未知';
-
-      return Container(
-        decoration: BoxDecoration(
-          border: topmost
-              ? Border.all(
-                  color: color.withValues(alpha: 0.6),
-                  width: 1,
-                )
-              : null,
-          borderRadius: BorderRadius.circular(0),
-          color: color.withValues(alpha: isOutside ? 0.08 : 0.15),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Opacity(
-          opacity: isOutside || dimmed ? 0.5 : 1.0,
-          child: coverPath != null && coverPath.isNotEmpty
-              ? Image.file(
-                  File(coverPath),
-                  fit: BoxFit.cover,
-                  alignment: Alignment.center,
-                  errorBuilder: (_, __, ___) =>
-                      _buildPosterFallback(showName, color),
-                )
-              : _buildPosterFallback(showName, color),
-        ),
-      );
-    }
-
-    Widget posterContent;
-    if (showCount == 1) {
-      posterContent = posterThumbnail(events.first, topmost: true);
-    } else {
-      // 多张海报：3:4 小卡层叠，点击轮换
-      final nextIndex = (safeIndex + 1) % showCount;
-
-      posterContent = Stack(
-        fit: StackFit.expand,
-        children: [
-          // 底层暗示小卡（轻微偏移、淡化）
-          Positioned(
-            left: showCount > 2 ? 6 : 4,
-            top: showCount > 2 ? 6 : 4,
-            right: 0,
-            bottom: 0,
-            child: Opacity(
-              opacity: 0.35,
-              child: posterThumbnail(
-                events[(safeIndex + 2) % showCount],
-                topmost: false,
-                dimmed: true,
-              ),
-            ),
-          ),
-          if (showCount > 2)
-            Positioned(
-              left: 3,
-              top: 3,
-              right: 0,
-              bottom: 0,
-              child: Opacity(
-                opacity: 0.55,
-                child: posterThumbnail(
-                  events[nextIndex],
-                  topmost: false,
-                  dimmed: true,
-                ),
-              ),
-            ),
-          // 当前主海报
-          Positioned(
-            left: 0,
-            top: 0,
-            right: showCount > 2 ? 6 : 4,
-            bottom: showCount > 2 ? 6 : 4,
-            child: posterThumbnail(events[safeIndex], topmost: true),
-          ),
-          // 张数角标
-          Positioned(
-            right: 6,
-            bottom: 6,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0xCC000000),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                '$showCount',
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    final cell = Opacity(
-      opacity: isOutside ? 0.45 : 1.0,
-      child: Container(
-        margin: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(2),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.4),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ]
-              : null,
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(2),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              posterContent,
-              // 选中蒙层
-              if (isSelected)
-                Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.3),
-                  ),
-                ),
-              // 日期圆标
-              Positioned(
-                left: 0,
-                top: 0,
-                child: Container(
-                  margin: const EdgeInsets.all(2),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xCC000000),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    '${day.day}',
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    // 多张海报时，点击选中日期；若已选中则轮换下一张
-    if (showCount > 1) {
-      return GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: () {
-          final isAlreadySelected = isSameDay(_selectedDay, day);
-          if (isAlreadySelected) {
-            setState(() {
-              _posterRotationIndex[normalizedDay] =
-                  (_posterRotationIndex[normalizedDay] ?? 0) + 1;
-            });
-          }
-          _onDaySelected(day);
-        },
-        child: cell,
-      );
-    }
-
-    if (isToday) {
-      return TodaySpotlight(
-        color: Theme.of(context).colorScheme.primary,
-        child: cell,
-      );
-    }
-    return cell;
   }
 
   // 年历页面
