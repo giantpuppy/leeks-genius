@@ -1,7 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../utils/status_colors.dart';
-import '../today_spotlight.dart';
+import '../status_badge.dart';
+import '../warm_spotlight.dart';
 
 /// 月历中有演出场次的日期单元格。
 ///
@@ -12,6 +13,7 @@ class CalendarPosterCell extends StatelessWidget {
   final bool isToday;
   final bool isSelected;
   final bool isOutside;
+  final bool showStatusBadge;
   final int rotationIndex;
 
   const CalendarPosterCell({
@@ -21,21 +23,176 @@ class CalendarPosterCell extends StatelessWidget {
     required this.isToday,
     required this.isSelected,
     this.isOutside = false,
+    this.showStatusBadge = false,
     this.rotationIndex = 0,
   });
 
-  static const double _outerRadius = 6.0;
-  static const double _innerRadius = 3.6; // _outerRadius * 0.6
+  static const double _outerRadius = 10.0;
+  static const double _innerRadius = 6.0;
 
   @override
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
+
+    final topEvent = events[rotationIndex % events.length];
+    final topStatus = topEvent['status'] as String? ?? 'unmarked';
+
+    Widget content = ClipRRect(
+      borderRadius: BorderRadius.circular(_outerRadius),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final cellSize = constraints.biggest;
+          final cellPadding = cellSize.shortestSide * 0.04;
+          final contentHeight = cellSize.height - cellPadding * 2;
+          final posterAreaHeight = contentHeight * 0.82;
+          final timeBarHeight = contentHeight * 0.18;
+          final timeFontSize = (cellSize.height * 0.07).clamp(9.0, 12.0);
+
+          final topTime = topEvent['time'] as String? ?? '';
+          final timeText = topTime.length >= 5
+              ? topTime.substring(0, 5)
+              : topTime;
+          final statusColor = statusColorForEvent(topEvent);
+
+          return Container(
+            padding: EdgeInsets.all(cellPadding),
+            color: Colors.transparent,
+            child: Column(
+              children: [
+                // 海报堆叠区
+                SizedBox(
+                  height: posterAreaHeight,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _buildPosterStack(
+                        events,
+                        isOutside,
+                        posterAreaHeight,
+                        cellSize.shortestSide,
+                      ),
+
+                      // 顶部渐变蒙层（保证角标/文字可读）
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(_innerRadius),
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.35),
+                                  Colors.black.withValues(alpha: 0.08),
+                                  Colors.transparent,
+                                ],
+                                stops: const [0.0, 0.55, 1.0],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 选中蒙层（仅覆盖海报区）
+                      AnimatedOpacity(
+                        opacity: isSelected ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 200),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: primaryColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(_innerRadius),
+                          ),
+                        ),
+                      ),
+
+                      // 今天角标
+                      if (isToday)
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          child: _buildTodayBadge(),
+                        ),
+
+                      // 状态胶囊（选中态或周视图显示）
+                      if (showStatusBadge && topStatus != 'unmarked')
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: StatusBadge(
+                              label: _statusLabel(topStatus),
+                              color: statusColor,
+                              fontSize: 8,
+                              borderRadius: 6,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 1,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+
+                // 底部时间区
+                Container(
+                  height: timeBarHeight,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A1A1A).withValues(alpha: 0.85),
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(_innerRadius),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: statusColor.withValues(alpha: 0.25),
+                        blurRadius: 8,
+                        spreadRadius: 0,
+                      ),
+                    ],
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    timeText,
+                    style: TextStyle(
+                      fontSize: timeFontSize,
+                      fontWeight: FontWeight.w600,
+                      color: statusColor,
+                      shadows: [
+                        Shadow(
+                          color: statusColor.withValues(alpha: 0.6),
+                          blurRadius: 6,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    if (isToday) {
+      content = WarmSpotlight(
+        color: kBrandPurple,
+        borderRadius: _outerRadius,
+        minAlpha: 0.06,
+        maxAlpha: 0.12,
+        minBlur: 6,
+        maxBlur: 12,
+        child: content,
+      );
+    }
 
     return Opacity(
       opacity: isOutside ? 0.45 : 1.0,
       child: Container(
         margin: const EdgeInsets.all(2),
         decoration: BoxDecoration(
+          color: isToday ? primaryColor.withValues(alpha: 0.04) : null,
           borderRadius: BorderRadius.circular(_outerRadius),
           boxShadow: isSelected
               ? [
@@ -52,106 +209,45 @@ class CalendarPosterCell extends StatelessWidget {
                 ]
               : null,
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(_outerRadius),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final cellSize = constraints.biggest;
-              final cellPadding = cellSize.shortestSide * 0.04;
-              final contentHeight = cellSize.height - cellPadding * 2;
-              final posterAreaHeight = contentHeight * 0.82;
-              final timeBarHeight = contentHeight * 0.18;
-              final timeFontSize = (cellSize.height * 0.07).clamp(9.0, 12.0);
+        child: content,
+      ),
+    );
+  }
 
-              final topEvent = events[rotationIndex % events.length];
-              final topTime = topEvent['time'] as String? ?? '';
-              final timeText = topTime.length >= 5
-                  ? topTime.substring(0, 5)
-                  : topTime;
-              final statusColor = statusColorForEvent(topEvent);
-
-              Widget cellContent = Container(
-                padding: EdgeInsets.all(cellPadding),
-                color: Colors.transparent,
-                child: Column(
-                  children: [
-                    // 海报堆叠区
-                    SizedBox(
-                      height: posterAreaHeight,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          _buildPosterStack(
-                            events,
-                            isOutside,
-                            posterAreaHeight,
-                            cellSize.shortestSide,
-                          ),
-
-                          // 选中蒙层（仅覆盖海报区）
-                          AnimatedOpacity(
-                            opacity: isSelected ? 1.0 : 0.0,
-                            duration: const Duration(milliseconds: 200),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: primaryColor.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(_innerRadius),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // 底部时间区
-                    Container(
-                      height: timeBarHeight,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1A1A1A).withValues(alpha: 0.85),
-                        borderRadius: const BorderRadius.vertical(
-                          bottom: Radius.circular(_innerRadius),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: statusColor.withValues(alpha: 0.25),
-                            blurRadius: 8,
-                            spreadRadius: 0,
-                          ),
-                        ],
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        timeText,
-                        style: TextStyle(
-                          fontSize: timeFontSize,
-                          fontWeight: FontWeight.w600,
-                          color: statusColor,
-                          shadows: [
-                            Shadow(
-                              color: statusColor.withValues(alpha: 0.6),
-                              blurRadius: 6,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-
-              if (isToday) {
-                cellContent = TodaySpotlight(
-                  color: primaryColor,
-                  child: cellContent,
-                );
-              }
-
-              return cellContent;
-            },
+  Widget _buildTodayBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: kBrandPurple.withValues(alpha: 0.85),
+        borderRadius: const BorderRadius.only(
+          bottomRight: Radius.circular(6),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: kBrandPurple.withValues(alpha: 0.3),
+            blurRadius: 4,
+            spreadRadius: 0,
           ),
+        ],
+      ),
+      child: const Text(
+        '今天',
+        style: TextStyle(
+          fontSize: 8,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
         ),
       ),
     );
+  }
+
+  String _statusLabel(String status) {
+    return switch (status) {
+      'want_to_see' => '想看',
+      'bought' => '已买',
+      'watched' => '已观演',
+      _ => '未标记',
+    };
   }
 
   Widget _buildPosterStack(
@@ -261,6 +357,7 @@ class CalendarPosterCell extends StatelessWidget {
     final color = statusColor(status);
     final coverPath = event['cover_path'] as String?;
     final showName = event['show_name'] as String? ?? '未知';
+    final showId = event['show_id'] as int? ?? 0;
 
     Widget content = coverPath != null && coverPath.isNotEmpty
         ? Image.file(
@@ -268,9 +365,9 @@ class CalendarPosterCell extends StatelessWidget {
             fit: BoxFit.cover,
             alignment: Alignment.center,
             errorBuilder: (_, __, ___) =>
-                _buildPosterFallback(showName: showName, color: color),
+                _buildPosterFallback(showName: showName, showId: showId),
           )
-        : _buildPosterFallback(showName: showName, color: color);
+        : _buildPosterFallback(showName: showName, showId: showId);
 
     if (isOutside) {
       content = Opacity(opacity: 0.5, child: content);
@@ -280,6 +377,10 @@ class CalendarPosterCell extends StatelessWidget {
       key: key,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
         color: color.withValues(alpha: isOutside ? 0.08 : 0.15),
       ),
       clipBehavior: Clip.antiAlias,
@@ -287,15 +388,16 @@ class CalendarPosterCell extends StatelessWidget {
     );
   }
 
-  Widget _buildPosterFallback({required String showName, required Color color}) {
+  Widget _buildPosterFallback({required String showName, required int showId}) {
+    final color = coverColorForShow(showId);
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            color.withValues(alpha: 0.35),
-            color.withValues(alpha: 0.1),
+            color,
+            coverColorForShow(showId + 3),
           ],
         ),
       ),
@@ -305,7 +407,7 @@ class CalendarPosterCell extends StatelessWidget {
           style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.bold,
-            color: color,
+            color: color.computeLuminance() > 0.5 ? Colors.black : Colors.white,
           ),
           textAlign: TextAlign.center,
         ),

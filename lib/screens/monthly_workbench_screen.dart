@@ -2,12 +2,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../database/database_helper.dart';
 import '../models/show.dart';
-import '../models/performance.dart';
-import '../models/cast_member.dart';
+import '../utils/status_colors.dart';
+import '../widgets/breathing_icon.dart';
 import 'add_show_screen.dart';
+import 'show_management_screen.dart';
 
-/// 月度管理工作台
-/// 按剧目聚合显示某个月份的所有演出，支持全量编辑
+/// 月度管理工作台 — 海报网格画廊
+/// 2列海报网格，年月选择器，点击进入剧目管理
 class MonthlyWorkbenchScreen extends StatefulWidget {
   final int year;
   final int month;
@@ -24,75 +25,110 @@ class MonthlyWorkbenchScreen extends StatefulWidget {
 
 class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
   bool _isLoading = true;
-  List<Map<String, dynamic>> _performances = [];
+  late int _year;
+  late int _month;
+  List<Show> _shows = [];
+  Map<int, int> _showPerformanceCounts = {};
 
   @override
   void initState() {
     super.initState();
+    _year = widget.year;
+    _month = widget.month;
     _loadData();
   }
 
   Future<void> _loadData() async {
+    setState(() => _isLoading = true);
     final db = DatabaseHelper.instance;
-    final perfs = await db.getPerformancesByMonth(widget.year, widget.month);
+    final perfs = await db.getPerformancesByMonth(_year, _month);
+
+    // 按 showId 去重，获取剧目列表
+    final showIds = <int>{};
+    final counts = <int, int>{};
+    for (final perf in perfs) {
+      final showId = perf['show_id'] as int;
+      showIds.add(showId);
+      counts[showId] = (counts[showId] ?? 0) + 1;
+    }
+
+    final shows = <Show>[];
+    for (final showId in showIds) {
+      final show = await db.getShowById(showId);
+      if (show != null) shows.add(show);
+    }
+
+    if (mounted) {
+      setState(() {
+        _shows = shows;
+        _showPerformanceCounts = counts;
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _changeMonth(int delta) {
     setState(() {
-      _performances = perfs;
-      _isLoading = false;
+      _month += delta;
+      if (_month > 12) {
+        _month = 1;
+        _year++;
+      } else if (_month < 1) {
+        _month = 12;
+        _year--;
+      }
     });
+    _loadData();
   }
 
-  /// 按剧目名称分组
-  Map<String, List<Map<String, dynamic>>> get _groupedByShow {
-    final groups = <String, List<Map<String, dynamic>>>{};
-    for (final perf in _performances) {
-      final showName = perf['show_name'] as String? ?? '未知剧目';
-      groups.putIfAbsent(showName, () => []).add(perf);
+  Future<void> _pickMonth() async {
+    final initialDate = DateTime(_year, _month, 1);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2020, 1),
+      lastDate: DateTime(2030, 12),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Color(0xFF6B5BCD),
+              onPrimary: Colors.white,
+              surface: Color(0xFF1E1E1E),
+              onSurface: Colors.white,
+            ),
+            dialogTheme: const DialogThemeData(backgroundColor: Color(0xFF1E1E1E)),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _year = picked.year;
+        _month = picked.month;
+      });
+      _loadData();
     }
-    return groups;
   }
 
-  Color _getStatusColor(String? status) {
-    switch (status) {
-      case 'bought':
-        return const Color(0xFF34D399);
-      case 'want_to_see':
-        return const Color(0xFF811FE2);
-      default:
-        return const Color(0xFF6B7280);
-    }
-  }
-
-  String _getStatusLabel(String? status) {
-    switch (status) {
-      case 'bought':
-        return '已买';
-      case 'want_to_see':
-        return '想看';
-      default:
-        return '未标记';
-    }
-  }
-
-  Future<void> _editPerformance(Map<String, dynamic> perf) async {
-    final showId = perf['show_id'] as int;
-    final db = DatabaseHelper.instance;
-
-    final show = await db.getShowById(showId);
-    final perfs = await db.getPerformancesByShowId(showId);
-
-    if (show == null || !mounted) return;
-
+  Future<void> _navigateToShowManagement(Show show) async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AddShowScreen(
-          initialShow: show,
-          initialPerformances: perfs,
-          isEditMode: true,
-        ),
+        builder: (_) => ShowManagementScreen(showId: show.id!),
       ),
     );
+    if (result == true) {
+      _loadData();
+    }
+  }
 
+  Future<void> _addNewShow() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddShowScreen()),
+    );
     if (result == true) {
       _loadData();
     }
@@ -100,7 +136,8 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final monthStr = widget.month.toString().padLeft(2, '0');
+    final screenWidth = MediaQuery.of(context).size.width;
+    final gridSpacing = screenWidth * 0.03;
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -111,25 +148,57 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context, true),
         ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              '${widget.year}年${widget.month}月',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            IconButton(
+              icon: const Icon(Icons.arrow_left, color: Colors.white70),
+              onPressed: () => _changeMonth(-1),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              iconSize: 28,
             ),
-            const Text(
-              '管理台',
-              style: TextStyle(fontSize: 12, color: Color(0xFF8A8F98), fontWeight: FontWeight.w400),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: _pickMonth,
+              child: Text(
+                '$_year年$_month月',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.arrow_right, color: Colors.white70),
+              onPressed: () => _changeMonth(1),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              iconSize: 28,
             ),
           ],
         ),
+        centerTitle: true,
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF6B5BCD)))
-          : _performances.isEmpty
-              ? _buildEmptyState()
-              : _buildGroupedList(),
+      body: GestureDetector(
+        onHorizontalDragEnd: (details) {
+          if (details.primaryVelocity == null) return;
+          if (details.primaryVelocity! > 0) {
+            _changeMonth(-1); // swipe right → previous month
+          } else if (details.primaryVelocity! < 0) {
+            _changeMonth(1); // swipe left → next month
+          }
+        },
+        child: _isLoading
+            ? const Center(
+                child: CircularProgressIndicator(color: kBrandPurple),
+              )
+            : _shows.isEmpty
+                ? _buildEmptyState()
+                : _buildPosterGrid(gridSpacing),
+      ),
     );
   }
 
@@ -138,252 +207,171 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.event_busy, size: 64, color: Colors.white.withOpacity(0.2)),
-          const SizedBox(height: 16),
+          const BreathingIcon(
+            icon: Icons.event_busy_outlined,
+            size: 72,
+            color: Color(0xFF4D4D4D),
+          ),
+          const SizedBox(height: 20),
           Text(
-            '${widget.year}年${widget.month}月暂无演出',
-            style: TextStyle(fontSize: 16, color: Colors.white.withOpacity(0.5)),
+            '这个月还没有排期',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.white.withValues(alpha: 0.5),
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _addNewShow,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('添加剧目'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kBrandPurple,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildGroupedList() {
-    final groups = _groupedByShow;
-    final showNames = groups.keys.toList();
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: showNames.length,
-      itemBuilder: (context, index) {
-        final showName = showNames[index];
-        final perfs = groups[showName]!;
-        return _buildShowCard(showName, perfs);
-      },
+  Widget _buildPosterGrid(double spacing) {
+    return GridView.count(
+      padding: EdgeInsets.all(spacing),
+      crossAxisCount: 2,
+      childAspectRatio: 3 / 4,
+      crossAxisSpacing: spacing,
+      mainAxisSpacing: spacing,
+      children: _shows.map((show) => _buildPosterCard(show)).toList(),
     );
   }
 
-  Widget _buildShowCard(String showName, List<Map<String, dynamic>> perfs) {
-    final coverPath = perfs.first['cover_path'] as String?;
-    final theater = perfs.first['theater'] as String? ?? '';
+  Widget _buildPosterCard(Show show) {
+    final coverPath = show.coverPath;
+    final color = coverColorForShow(show.id ?? 0);
+    final count = _showPerformanceCounts[show.id] ?? 0;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 剧目标题行
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                // 海报缩略图
-                _buildMiniCover(coverPath),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 剧名 + 剧场同行
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              showName,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (theater.isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: Text(
-                                theater,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.white.withOpacity(0.45),
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '总共${perfs.length}场次',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.white.withOpacity(0.5),
-                        ),
-                      ),
+    return GestureDetector(
+      onTap: () => _navigateToShowManagement(show),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.15),
+            width: 1,
+          ),
+          boxShadow: [
+            // Bottom shadow
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.4),
+              blurRadius: 8,
+              spreadRadius: 0,
+              offset: const Offset(0, 4),
+            ),
+            // Colored glow
+            BoxShadow(
+              color: color.withValues(alpha: 0.2),
+              blurRadius: 16,
+              spreadRadius: 0,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Cover image or gradient fallback
+            if (coverPath != null && coverPath.isNotEmpty)
+              Image.file(
+                File(coverPath),
+                fit: BoxFit.cover,
+              )
+            else
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [color, color.withValues(alpha: 0.6)],
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    show.name.length >= 2
+                        ? show.name.substring(0, 2)
+                        : show.name,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+
+            // Performance count badge (top-right)
+            if (count > 1)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Text(
+                    '$count场',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+
+            // Show name at bottom with gradient overlay
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(12, 24, 12, 12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.7),
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          // 分隔线
-          Divider(height: 1, color: Colors.white.withOpacity(0.06)),
-          // 演出列表
-          ...perfs.map((perf) => _buildPerformanceItem(perf)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMiniCover(String? coverPath) {
-    return Container(
-      width: 40,
-      height: 56,
-      decoration: BoxDecoration(
-        color: const Color(0xFF2A2A2A),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: coverPath != null && coverPath.isNotEmpty
-          ? Image.file(File(coverPath), fit: BoxFit.cover)
-          : Container(
-              color: const Color(0xFF2A2A2A),
-              child: Icon(Icons.image, size: 20, color: Colors.white.withOpacity(0.2)),
-            ),
-    );
-  }
-
-  Widget _buildPerformanceItem(Map<String, dynamic> perf) {
-    final date = perf['date'] as String? ?? '';
-    final time = (perf['time'] as String?)?.substring(0, 5) ?? '';
-    final status = perf['status'] as String?;
-    final seat = perf['seat'] as String?;
-    final price = perf['price'] != null ? (perf['price'] as num).toDouble() : null;
-    final statusColor = _getStatusColor(status);
-
-    return InkWell(
-      onTap: () => _editPerformance(perf),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Colors.white.withOpacity(0.04)),
-          ),
-        ),
-        child: Row(
-          children: [
-            // 日期列
-            SizedBox(
-              width: 60,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    date.substring(5), // MM-DD
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
+                child: Text(
+                  show.name,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    time,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.white.withOpacity(0.5),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // 座位 + 价格
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (seat != null && seat.isNotEmpty)
-                    Text(
-                      '座位: $seat',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.white.withOpacity(0.7),
-                      ),
-                    ),
-                  if (price != null)
-                    Text(
-                      '¥${price.toStringAsFixed(0)}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.white.withOpacity(0.4),
-                      ),
-                    ),
-                  if ((seat == null || seat.isEmpty) && price == null)
-                    Text(
-                      '点击编辑',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.white.withOpacity(0.25),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            // 状态：星星 icon + 文字
-            GestureDetector(
-              onTap: () {
-                // 循环切换状态: unmarked → want_to_see → bought → unmarked
-                final next = status == 'bought'
-                    ? 'unmarked'
-                    : status == 'want_to_see'
-                        ? 'bought'
-                        : 'want_to_see';
-                _toggleStatus(perf, next);
-              },
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    status == 'want_to_see' ? Icons.star_rounded : Icons.star_border_rounded,
-                    size: 18,
-                    color: statusColor,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _getStatusLabel(status),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: statusColor,
-                    ),
-                  ),
-                ],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ],
         ),
       ),
     );
-  }
-
-  Future<void> _toggleStatus(Map<String, dynamic> perf, String newStatus) async {
-    final db = DatabaseHelper.instance;
-    final perfId = perf['id'] as int;
-    final performance = await db.getPerformanceById(perfId);
-    if (performance != null) {
-      await db.updatePerformance(performance.copyWith(status: newStatus));
-      setState(() {
-        perf['status'] = newStatus;
-      });
-    }
   }
 }

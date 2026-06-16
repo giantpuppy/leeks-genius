@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'calendar_screen.dart';
 import 'gantt_screen.dart';
 import 'profile_screen.dart';
+import '../widgets/schedule_tab_icon.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -14,6 +15,11 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   bool _calendarHasSelectedEvent = false;
+  final _ganttKey = GlobalKey<GanttScreenState>();
+  final _fallbackModeNotifier = ValueNotifier<TimelineMode>(TimelineMode.focus3Day);
+
+  ValueNotifier<TimelineMode> get _scheduleModeNotifier =>
+      _ganttKey.currentState?.modeNotifier ?? _fallbackModeNotifier;
 
   List<Widget> get _pages => [
         CalendarScreen(
@@ -21,9 +27,15 @@ class _MainScreenState extends State<MainScreen> {
             setState(() => _calendarHasSelectedEvent = hasEvent);
           },
         ),
-        const GanttScreen(),
+        GanttScreen(key: _ganttKey),
         const ProfileScreen(),
       ];
+
+  @override
+  void dispose() {
+    _fallbackModeNotifier.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,6 +85,10 @@ class _MainScreenState extends State<MainScreen> {
                 child: NavigationBar(
                   selectedIndex: _currentIndex,
                   onDestinationSelected: (index) {
+                    if (index == 1 && _currentIndex == 1) {
+                      _ganttKey.currentState?.toggleMode();
+                      return;
+                    }
                     setState(() {
                       _currentIndex = index;
                     });
@@ -80,18 +96,58 @@ class _MainScreenState extends State<MainScreen> {
                   backgroundColor: Colors.transparent,
                   elevation: 0,
                   overlayColor: WidgetStateProperty.all(Colors.transparent),
-                  destinations: const [
-                    NavigationDestination(
+                  destinations: [
+                    const NavigationDestination(
                       icon: Icon(Icons.calendar_month_outlined),
                       selectedIcon: Icon(Icons.calendar_month),
                       label: '日历',
                     ),
-                    NavigationDestination(
-                      icon: Icon(Icons.view_timeline_outlined),
-                      selectedIcon: Icon(Icons.view_timeline),
-                      label: '排期',
+                    ValueListenableBuilder<TimelineMode>(
+                      valueListenable: _scheduleModeNotifier,
+                      builder: (context, mode, child) {
+                        final isFocus = mode == TimelineMode.focus3Day;
+                        return NavigationDestination(
+                          icon: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            transitionBuilder: (child, animation) {
+                              return FadeTransition(
+                                opacity: animation,
+                                child: ScaleTransition(
+                                  scale: animation,
+                                  child: child,
+                                ),
+                              );
+                            },
+                            child: ScheduleTabIcon(
+                              mode: isFocus
+                                  ? ScheduleTabIconMode.threeDay
+                                  : ScheduleTabIconMode.sevenDay,
+                              key: ValueKey<bool>(isFocus),
+                            ),
+                          ),
+                          selectedIcon: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            transitionBuilder: (child, animation) {
+                              return FadeTransition(
+                                opacity: animation,
+                                child: ScaleTransition(
+                                  scale: animation,
+                                  child: child,
+                                ),
+                              );
+                            },
+                            child: ScheduleTabIcon(
+                              mode: isFocus
+                                  ? ScheduleTabIconMode.threeDay
+                                  : ScheduleTabIconMode.sevenDay,
+                              key: ValueKey<bool>(!isFocus),
+                            ),
+                          ),
+                          label: '排期',
+                        );
+                      },
                     ),
-                    NavigationDestination(
+                    const NavigationDestination(
                       icon: Icon(Icons.person_outline),
                       selectedIcon: Icon(Icons.person),
                       label: '我的',

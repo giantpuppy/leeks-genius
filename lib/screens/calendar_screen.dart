@@ -10,8 +10,10 @@ import '../utils/status_colors.dart' as status_colors;
 import '../widgets/animated_list_item.dart';
 import '../widgets/breathing_icon.dart';
 import '../widgets/calendar/calendar_cell.dart';
+import '../widgets/status_badge.dart';
 import '../widgets/status_dot.dart';
 import '../widgets/ticket_clipper.dart';
+import 'add_show_screen.dart';
 import 'unified_show_detail_screen.dart';
 import 'year_calendar_screen.dart';
 
@@ -36,10 +38,14 @@ class CalendarScreen extends StatefulWidget {
   const CalendarScreen({
     super.key,
     this.onSelectedDayHasEvent,
+    this.initialFilter,
+    this.initialFocusedDay,
   });
 
   /// 当选中日期是否包含剧目发生变化时回调（用于底部导航条上方光感分隔符）
   final ValueChanged<bool>? onSelectedDayHasEvent;
+  final CalendarFilter? initialFilter;
+  final DateTime? initialFocusedDay;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -65,7 +71,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
   @override
   void initState() {
     super.initState();
+    _focusedDay = widget.initialFocusedDay ?? DateTime.now();
     _selectedDay = _focusedDay;
+    _filter = widget.initialFilter ?? CalendarFilter.bought;
     _loadEventsForMonth(_focusedDay);
     _loadPerformancesForDate(_focusedDay);
     _scrollController.addListener(_onScroll);
@@ -413,6 +421,29 @@ class _CalendarScreenState extends State<CalendarScreen> {
               ),
             ),
             actions: [
+              Container(
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6B5BCD),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: IconButton(
+                  onPressed: () async {
+                    final result = await Navigator.push(
+                      context,
+                      SlideFadeRoute(page: const AddShowScreen()),
+                    );
+                    if (result == true) {
+                      _loadEventsForMonth(_focusedDay);
+                      _loadPerformancesForDate(_selectedDay ?? _focusedDay);
+                      _notifySelectedDayHasEvent();
+                    }
+                  },
+                  icon: const Icon(Icons.add, size: 24),
+                  color: Colors.white,
+                  tooltip: '添加剧目',
+                ),
+              ),
               _buildFilterButton(),
               const SizedBox(width: 8),
             ],
@@ -487,6 +518,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               isToday: false,
                               isSelected: false,
                               events: _events[normalized] ?? [],
+                              showStatusBadge:
+                                  _calendarFormat == CalendarFormat.week,
                             );
                           },
                           todayBuilder: (context, day, focusedDay) {
@@ -497,6 +530,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               isToday: true,
                               isSelected: false,
                               events: _events[normalized] ?? [],
+                              showStatusBadge:
+                                  _calendarFormat == CalendarFormat.week,
                             );
                           },
                           selectedBuilder: (context, day, focusedDay) {
@@ -508,6 +543,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               isSelected: true,
                               events: _events[normalized] ?? [],
                               rotationIndex: _posterRotationIndex,
+                              showStatusBadge:
+                                  _calendarFormat == CalendarFormat.week,
                             );
                           },
                           outsideBuilder: (context, day, focusedDay) {
@@ -522,6 +559,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               isSelected: false,
                               isOutside: true,
                               events: _events[normalized] ?? [],
+                              showStatusBadge:
+                                  _calendarFormat == CalendarFormat.week,
                             );
                           },
                           disabledBuilder: (context, day, focusedDay) =>
@@ -706,6 +745,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               perf['status'] as String? ?? 'unmarked';
                           final statusColor = status_colors.statusColor(status);
                           final coverPath = perf['cover_path'] as String?;
+                          final showId = perf['show_id'] as int? ?? 0;
 
                           return AnimatedListItem(
                             index: index,
@@ -725,7 +765,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 });
                               },
                               child: _buildTicketCard(
-                                  perf, status, statusColor, coverPath),
+                                  perf, status, statusColor, coverPath, showId),
                             ),
                           );
                         },
@@ -745,9 +785,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
+  String _statusLabel(String status) {
+    return switch (status) {
+      'want_to_see' => '想看',
+      'bought' => '已买',
+      'watched' => '已观演',
+      _ => '未标记',
+    };
+  }
+
   // 大麦风格票根卡片
   Widget _buildTicketCard(Map<String, dynamic> perf, String status,
-      Color statusColor, String? coverPath) {
+      Color statusColor, String? coverPath, int showId) {
     final showName = perf['show_name'] ?? '未知剧目';
     final theater = perf['theater'] ?? '未知剧场';
     final rawDate = perf['date'] as String? ?? '';
@@ -772,7 +821,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
         final titleFontSize = (cardHeight * 0.16).clamp(14.0, 18.0);
         final metaFontSize = (cardHeight * 0.13).clamp(11.0, 14.0);
         final dateFontSize = (cardHeight * 0.12).clamp(10.0, 13.0);
-        final statusIconSize = (cardHeight * 0.24).clamp(22.0, 30.0);
 
         return Padding(
           padding: EdgeInsets.only(
@@ -787,6 +835,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
               decoration: BoxDecoration(
                 color: const Color(0xFF1E1E1E),
                 borderRadius: BorderRadius.circular(maxW * 0.035),
+                boxShadow: [
+                  BoxShadow(
+                    color: status_colors
+                        .coverColorForShow(showId)
+                        .withValues(alpha: 0.15),
+                    blurRadius: 14,
+                    spreadRadius: 0,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Row(
                 children: [
@@ -799,8 +857,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                               colors: [
-                                statusColor.withValues(alpha: 0.35),
-                                statusColor.withValues(alpha: 0.1),
+                                status_colors.coverColorForShow(showId),
+                                status_colors.coverColorForShow(showId + 3),
                               ],
                             )
                           : null,
@@ -820,7 +878,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               style: TextStyle(
                                 fontSize: cardHeight * 0.22,
                                 fontWeight: FontWeight.bold,
-                                color: statusColor,
+                                color: Colors.white,
                               ),
                             ),
                           )
@@ -917,8 +975,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   SizedBox(
                     width: statusAreaWidth,
                     child: Center(
-                      child: Icon(status_colors.statusIcon(status),
-                          size: statusIconSize, color: statusColor),
+                      child: StatusBadge(
+                        label: _statusLabel(status),
+                        color: statusColor,
+                        fontSize: 10,
+                      ),
                     ),
                   ),
                 ],

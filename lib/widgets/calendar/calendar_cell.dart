@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lunar/lunar.dart';
+import '../../utils/status_colors.dart';
+import '../warm_spotlight.dart';
 import 'calendar_poster_cell.dart';
 
 /// 月历单个日期单元格。
@@ -11,6 +13,7 @@ class CalendarCell extends StatelessWidget {
   final bool isSelected;
   final bool isOutside;
   final List<Map<String, dynamic>> events;
+  final bool showStatusBadge;
   final int rotationIndex;
 
   const CalendarCell({
@@ -20,6 +23,7 @@ class CalendarCell extends StatelessWidget {
     required this.isSelected,
     this.isOutside = false,
     this.events = const [],
+    this.showStatusBadge = false,
     this.rotationIndex = 0,
   });
 
@@ -38,6 +42,7 @@ class CalendarCell extends StatelessWidget {
         isToday: isToday,
         isSelected: isSelected,
         isOutside: isOutside,
+        showStatusBadge: showStatusBadge,
         rotationIndex: rotationIndex,
       );
     }
@@ -55,7 +60,7 @@ class CalendarCell extends StatelessWidget {
         ? const Color(0xFFB3B3B3)
         : Colors.white;
 
-    return Container(
+    Widget content = Container(
       margin: const EdgeInsets.all(2),
       alignment: Alignment.center,
       decoration: isSelected
@@ -65,7 +70,7 @@ class CalendarCell extends StatelessWidget {
                 width: 1,
               ),
               color: primaryColor.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(10),
               boxShadow: [
                 BoxShadow(
                   color: primaryColor.withValues(alpha: 0.2),
@@ -74,7 +79,12 @@ class CalendarCell extends StatelessWidget {
                 ),
               ],
             )
-          : null,
+          : (isToday
+              ? BoxDecoration(
+                  color: kBrandPurple.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(10),
+                )
+              : null),
       child: FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.center,
@@ -92,7 +102,7 @@ class CalendarCell extends StatelessWidget {
                     : FontWeight.normal,
                 color: isSelected
                     ? Colors.white
-                    : (isToday ? primaryColor : textColor),
+                    : (isToday ? kBrandPurple : textColor),
               ),
             ),
             Text(
@@ -102,7 +112,7 @@ class CalendarCell extends StatelessWidget {
                 color: isSelected
                     ? Colors.white.withValues(alpha: 0.8)
                     : (isToday
-                        ? primaryColor.withValues(alpha: 0.7)
+                        ? kBrandPurple.withValues(alpha: 0.7)
                         : const Color(0xFF8A8F98)),
               ),
             ),
@@ -110,5 +120,19 @@ class CalendarCell extends StatelessWidget {
         ),
       ),
     );
+
+    if (isToday) {
+      content = WarmSpotlight(
+        color: kBrandPurple,
+        borderRadius: 10,
+        minAlpha: 0.04,
+        maxAlpha: 0.08,
+        minBlur: 4,
+        maxBlur: 8,
+        child: content,
+      );
+    }
+
+    return content;
   }
 }

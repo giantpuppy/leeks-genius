@@ -5,8 +5,14 @@ import '../models/performance.dart';
 import '../utils/page_transitions.dart';
 import '../models/actor.dart';
 import '../models/cast_member.dart';
+import '../models/profile_stats.dart';
 import '../services/user_service.dart';
+import '../widgets/charts/chart_theme.dart';
+import '../widgets/charts/simple_bar_chart.dart';
+import '../widgets/charts/horizontal_bar_chart.dart';
+import '../widgets/charts/donut_chart.dart';
 import 'add_show_screen.dart';
+import 'calendar_screen.dart';
 import 'settings_page.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -25,92 +31,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _currentUser;
   bool _needsRefresh = true;
 
-  int get _wantToSeeCount =>
-      _performances.where((p) => p.status == 'want_to_see').length;
+  TimeSlice _currentSlice = TimeSlice.all;
+  ProfileStats _stats = _emptyStats(TimeSlice.all);
+  bool _isActorDonut = false;
 
-  int get _boughtCount =>
-      _performances.where((p) => p.status == 'bought').length;
+  static ProfileStats _emptyStats(TimeSlice slice) {
+    return ProfileStats(
+      timeSlice: slice,
+      totalSessions: 0,
+      watchedSessions: 0,
+      upcomingSessions: 0,
+      totalPaid: 0,
+      faceValue: 0,
+      savedValue: 0,
+      totalDurationHours: 0,
+      showsTracked: 0,
+      monthlySessions: List.generate(12, (_) => 0),
+      actorRanking: const [],
+      theaterDistribution: const [],
+      timeSlotDistribution: const {'下午场': 0, '傍晚场': 0, '晚场': 0},
+    );
+  }
 
   int get _upcomingCount {
     final now = DateTime.now();
     final sevenDaysLater = now.add(const Duration(days: 7));
     return _performances.where((p) {
       if (p.status != 'bought') return false;
-      try {
-        final date = DateTime.parse(p.date);
-        return date.isAfter(now) && date.isBefore(sevenDaysLater);
-      } catch (_) {
-        return false;
-      }
+      final date = DateTime.tryParse(p.date);
+      return date != null &&
+          date.isAfter(now) &&
+          date.isBefore(sevenDaysLater);
     }).length;
-  }
-
-  // ===== 画廊墙数据计算 =====
-
-  int get _totalSessions =>
-      _performances.where((p) => p.status == 'bought').length;
-
-  double get _totalPaid {
-    return _performances
-        .where((p) => p.status == 'bought')
-        .fold(0.0, (sum, p) => sum + (p.actualPrice ?? p.price ?? 0));
-  }
-
-  double get _faceValue {
-    return _performances
-        .where((p) => p.status == 'bought')
-        .fold(0.0, (sum, p) => sum + (p.price ?? 0));
-  }
-
-  double get _savedValue {
-    final diff = _faceValue - _totalPaid;
-    return diff > 0 ? diff : 0;
-  }
-
-  int get _showsTracked {
-    final boughtShowIds = _performances
-        .where((p) => p.status == 'bought')
-        .map((p) => p.showId)
-        .toSet();
-    return boughtShowIds.length;
-  }
-
-  List<MapEntry<String, int>> get _topCastCredits {
-    final boughtPerfIds = _performances
-        .where((p) => p.status == 'bought')
-        .map((p) => p.id)
-        .whereType<int>()
-        .toSet();
-
-    final counts = <String, int>{};
-    for (final cm in _castMembers) {
-      if (boughtPerfIds.contains(cm.performanceId)) {
-        counts[cm.actorName] = (counts[cm.actorName] ?? 0) + 1;
-      }
-    }
-    final sorted = counts.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    return sorted.take(3).toList();
-  }
-
-  String get _dotMatrix {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-
-    final boughtDates = <String>{};
-    for (final p in _performances) {
-      if (p.status == 'bought') boughtDates.add(p.date);
-    }
-
-    final buffer = StringBuffer();
-    for (int i = 29; i >= 0; i--) {
-      final date = today.subtract(Duration(days: i));
-      final dateStr =
-          '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-      buffer.write(boughtDates.contains(dateStr) ? '●' : '·');
-      if (i % 10 == 0 && i != 0) buffer.write('\n');
-    }
-    return buffer.toString();
   }
 
   String _formatCurrency(double value) {
@@ -127,9 +79,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   static const TextStyle _monoLabel = TextStyle(
-    fontSize: 12,
+    fontSize: 10,
     fontFamily: 'monospace',
-    color: Color(0xFF8A8F98),
+    color: ChartTheme.muted,
     letterSpacing: 0.5,
   );
 
@@ -168,8 +120,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _actors = actors;
       _castMembers = castMembers;
       _currentUser = currentUser;
+      _stats = ProfileStats.fromData(
+        slice: _currentSlice,
+        performances: performances,
+        shows: shows,
+        castMembers: castMembers,
+      );
       _isLoading = false;
     });
+  }
+
+  void _recomputeStats() {
+    setState(() {
+      _stats = ProfileStats.fromData(
+        slice: _currentSlice,
+        performances: _performances,
+        shows: _shows,
+        castMembers: _castMembers,
+      );
+    });
+  }
+
+  void _navigateToCalendar(CalendarFilter filter, {DateTime? focusedDay}) {
+    Navigator.push(
+      context,
+      SlideFadeRoute(
+        page: CalendarScreen(
+          initialFilter: filter,
+          initialFocusedDay: focusedDay,
+        ),
+      ),
+    );
   }
 
   Future<void> _deleteShow(int showId) async {
@@ -234,6 +215,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  void _openSettings() {
+    Navigator.push(
+      context,
+      SlideFadeRoute(page: const SettingsPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -241,22 +229,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ? const Center(child: CircularProgressIndicator())
           : CustomScrollView(
               slivers: [
-                // 新顶栏：大字标题 + 头像入口
-                SliverToBoxAdapter(
-                  child: _buildHeader(),
-                ),
-                // 画廊墙：非对称数据视觉流
-                SliverToBoxAdapter(
-                  child: _buildGalleryWall(),
-                ),
-                // 底部资产入口
-                SliverToBoxAdapter(
-                  child: _buildAssetSection(),
-                ),
-                // 底部安全区
-                const SliverToBoxAdapter(
-                  child: SizedBox(height: 32),
-                ),
+                SliverToBoxAdapter(child: _buildHeader()),
+                SliverToBoxAdapter(child: _buildHeroMetrics()),
+                SliverToBoxAdapter(child: _buildChartsSection()),
+                SliverToBoxAdapter(child: _buildManagementSection()),
+                const SliverToBoxAdapter(child: SizedBox(height: 32)),
               ],
             ),
     );
@@ -268,26 +245,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Padding(
       padding: EdgeInsets.fromLTRB(24, statusBarHeight + 16, 24, 0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          _buildTimeSliceFilterButton(),
           const Spacer(),
-          // 右侧头像入口
           GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              SlideFadeRoute(page: const SettingsPage()),
-            ),
-            child: CircleAvatar(
-              radius: 20,
-              backgroundColor: const Color(0xFF6B5BCD).withValues(alpha: 0.2),
-              child: Text(
-                displayName.substring(0, 1).toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF6B5BCD),
+            onTap: _openSettings,
+            child: Row(
+              children: [
+                Text(
+                  displayName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: ChartTheme.muted,
+                  ),
                 ),
-              ),
+                const SizedBox(width: 10),
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primary.withValues(alpha:0.2),
+                  child: Text(
+                    displayName.substring(0, 1).toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -295,178 +281,362 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildGalleryWall() {
-    final primaryColor = Theme.of(context).colorScheme.primary;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildTimeSliceFilterButton() {
+    return IconButton(
+      icon: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: ChartTheme.background,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: ChartTheme.grid),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _currentSlice.label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: ChartTheme.label,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.keyboard_arrow_down, size: 16, color: ChartTheme.muted),
+          ],
+        ),
+      ),
+      onPressed: _isLoading ? null : _showTimeSliceMenu,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+    );
+  }
+
+  void _showTimeSliceMenu() async {
+    final RenderBox button = context.findRenderObject() as RenderBox;
+    final RenderBox overlay =
+        Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
+    final position = RelativeRect.fromRect(
+      Rect.fromPoints(
+        button.localToGlobal(button.size.topLeft(Offset.zero),
+            ancestor: overlay),
+        button.localToGlobal(button.size.bottomLeft(Offset.zero),
+            ancestor: overlay),
+      ),
+      Offset.zero & overlay.size,
+    );
+
+    final result = await showMenu<TimeSlice>(
+      context: context,
+      position: position,
+      color: const Color(0xFF1E1E1E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: TimeSlice.values.map((slice) => _buildTimeSliceMenuItem(slice)).toList(),
+    );
+
+    if (result != null && result != _currentSlice) {
+      setState(() => _currentSlice = result);
+      _recomputeStats();
+    }
+  }
+
+  PopupMenuItem<TimeSlice> _buildTimeSliceMenuItem(TimeSlice slice) {
+    final isSelected = _currentSlice == slice;
+    return PopupMenuItem(
+      value: slice,
+      child: Row(
         children: [
-          const SizedBox(height: 32),
-          // ===== 第一排：左高右低 =====
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 左栏：场次痕迹
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('SESSIONS', style: _monoLabel),
-                    const SizedBox(height: 8),
-                    Text(
-                      '$_totalSessions',
-                      style: const TextStyle(
-                        fontSize: 54,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'monospace',
-                        height: 1.0,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // 微点阵
-                    Text(
-                      _dotMatrix,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                        height: 1.4,
-                        color: primaryColor.withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // 右栏：票房账本
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('TOTAL PAID', style: _monoLabel),
-                    const SizedBox(height: 8),
-                    Text(
-                      '¥${_formatCurrency(_totalPaid)}',
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'monospace',
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'FACE VALUE: ¥${_formatCurrency(_faceValue)}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF8A8F98),
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'SAVED VALUE: ¥${_formatCurrency(_savedValue)}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF8A8F98),
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          Text(
+            slice.label,
+            style: TextStyle(
+              fontSize: 14,
+              color: isSelected ? Colors.white : ChartTheme.label,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            ),
           ),
-          // ===== 艺术感非对称分割线 =====
-          const Divider(
-            thickness: 1,
-            height: 48,
-            color: Colors.white10,
-            endIndent: 120.0,
-          ),
-          // ===== 第二排：左低右高 =====
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 左栏：打卡剧目
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('SHOWS', style: _monoLabel),
-                    const SizedBox(height: 8),
-                    Text(
-                      '$_showsTracked',
-                      style: const TextStyle(
-                        fontSize: 48,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'monospace',
-                        height: 1.0,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // 右栏：因缘职员表
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('CAST CREDITS', style: _monoLabel),
-                    const SizedBox(height: 12),
-                    if (_topCastCredits.isEmpty)
-                      const Text(
-                        '暂无数据',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF8A8F98),
-                          fontFamily: 'monospace',
-                          height: 2.0,
-                        ),
-                      )
-                    else
-                      ..._topCastCredits.map((entry) => Text(
-                        '${entry.key} × ${entry.value}',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontFamily: 'monospace',
-                          height: 2.0,
-                        ),
-                      )),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          // ===== 衔接底部资产清单 =====
-          const SizedBox(height: 40),
+          if (isSelected) ...[
+            const Spacer(),
+            const Icon(Icons.check, size: 16, color: Colors.white),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildAssetSection() {
+  Widget _buildHeroMetrics() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _MetricCard(
+                  label: '已观演',
+                  value: '${_stats.watchedSessions}',
+                  onTap: () => _navigateToCalendar(CalendarFilter.watched),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MetricCard(
+                  label: '已购买',
+                  value: '${_stats.upcomingSessions}',
+                  onTap: () => _navigateToCalendar(CalendarFilter.bought),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MetricCard(
+                  label: '观演时长',
+                  value: '${_stats.totalDurationHours.toStringAsFixed(1)}h',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _MetricCard(
+                  label: '花费',
+                  value: '¥${_formatCurrency(_stats.totalPaid)}',
+                  subtitle: '票面 ¥${_formatCurrency(_stats.faceValue)}',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MetricCard(
+                  label: '关注剧目场次',
+                  value: '${_stats.showsTracked}',
+                  onTap: () => _navigateToCalendar(CalendarFilter.bought),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MetricCard(
+                  label: '已买场次',
+                  value: '$_upcomingCount',
+                  accentColor: _upcomingCount > 0
+                      ? ChartTheme.primary
+                      : null,
+                  onTap: () => _navigateToCalendar(CalendarFilter.bought),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChartsSection() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _stats.totalSessions == 0
+              ? _buildEmptyChartPlaceholder(title: '月度观演节奏')
+              : SimpleBarChart(
+                  data: List.generate(
+                    12,
+                    (index) => ChartData(
+                      label: '${index + 1}月',
+                      value: _stats.monthlySessions[index],
+                    ),
+                  ),
+                  title: '月度观演节奏',
+                  activeColor: ChartTheme.primary,
+                  highlightIndex: DateTime.now().month - 1,
+                  onBarTap: (index) => _navigateToCalendar(
+                    CalendarFilter.bought,
+                    focusedDay: DateTime(DateTime.now().year, index + 1, 1),
+                  ),
+                ),
           const SizedBox(height: 16),
+          _buildActorChart(),
+          const SizedBox(height: 16),
+          _stats.theaterDistribution.isEmpty
+              ? _buildEmptyChartPlaceholder(title: '剧场分布')
+              : HorizontalBarChart(
+                  data: _stats.theaterDistribution
+                      .map((e) => ChartData(label: e.key, value: e.value))
+                      .toList(),
+                  title: '剧场分布',
+                  accentColor: ChartTheme.bought,
+                  displayCount: 5,
+                ),
+          const SizedBox(height: 16),
+          _stats.totalSessions == 0
+              ? _buildEmptyChartPlaceholder(title: '时段偏好')
+              : DonutChart(
+                  data: _stats.timeSlotDistribution,
+                  title: '时段偏好',
+                  colors: const [
+                    ChartTheme.watched,
+                    ChartTheme.primary,
+                    ChartTheme.bought,
+                  ],
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActorChart() {
+    if (_stats.actorRanking.isEmpty) {
+      return _buildEmptyChartPlaceholder(title: '演员出场排名');
+    }
+
+    final actorData = _stats.actorRanking
+        .map((e) => ChartData(label: e.key, value: e.value))
+        .toList();
+
+    return Container(
+      padding: const EdgeInsets.all(ChartTheme.cardPadding),
+      decoration: BoxDecoration(
+        color: ChartTheme.background,
+        borderRadius: BorderRadius.circular(ChartTheme.cardRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                '演员出场排名',
+                style: TextStyle(
+                  fontSize: ChartTheme.titleFontSize,
+                  fontWeight: FontWeight.w600,
+                  color: ChartTheme.label,
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => setState(() => _isActorDonut = !_isActorDonut),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: ChartTheme.grid.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    _isActorDonut ? Icons.bar_chart : Icons.donut_large,
+                    size: 16,
+                    color: ChartTheme.muted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_isActorDonut)
+            _buildActorDonutChart(actorData)
+          else
+            HorizontalBarChart(
+              data: actorData,
+              accentColor: ChartTheme.watched,
+              displayCount: 5,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActorDonutChart(List<ChartData> data) {
+    const topCount = 5;
+    final topItems = data.take(topCount).toList();
+    final othersCount = data.skip(topCount).fold(0, (sum, item) => sum + item.value);
+
+    final Map<String, int> chartData = {
+      for (final item in topItems) item.label: item.value,
+    };
+    if (othersCount > 0) {
+      chartData['其他'] = othersCount;
+    }
+
+    return DonutChart(
+      data: chartData,
+      colors: const [
+        ChartTheme.watched,
+        ChartTheme.primary,
+        ChartTheme.bought,
+        Color(0xFF8A8F98),
+        Color(0xFF6B5BCD),
+        Color(0xFFD4A853),
+      ],
+    );
+  }
+
+  Widget _buildEmptyChartPlaceholder({required String title}) {
+    return Container(
+      padding: const EdgeInsets.all(ChartTheme.cardPadding),
+      decoration: BoxDecoration(
+        color: ChartTheme.background,
+        borderRadius: BorderRadius.circular(ChartTheme.cardRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: ChartTheme.titleFontSize,
+              fontWeight: FontWeight.w600,
+              color: ChartTheme.label,
+            ),
+          ),
+          const SizedBox(height: 28),
+          Center(
+            child: Column(
+              children: [
+                Icon(
+                  Icons.bar_chart,
+                  color: ChartTheme.muted.withValues(alpha:0.4),
+                  size: 32,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '暂无数据',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: ChartTheme.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildManagementSection() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 32, 24, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('管理', style: _monoLabel),
+          const SizedBox(height: 12),
           _buildAssetTile(
             icon: Icons.theaters,
             label: '我的剧目',
             count: _shows.length,
             onTap: () => _showShowsSheet(),
           ),
-          const Divider(
-            height: 1,
-            indent: 48,
-            color: Color(0xFF2A2A2A),
-          ),
           _buildAssetTile(
             icon: Icons.people,
             label: '演员名单',
             count: _actors.length,
             onTap: () => _showActorsSheet(),
+          ),
+          _buildAssetTile(
+            icon: Icons.settings,
+            label: '设置',
+            subtitle: '账户、OCR、备份',
+            onTap: _openSettings,
           ),
         ],
       ),
@@ -476,7 +646,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildAssetTile({
     required IconData icon,
     required String label,
-    required int count,
+    int? count,
+    String? subtitle,
     required VoidCallback onTap,
   }) {
     return ListTile(
@@ -484,7 +655,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       leading: Icon(
         icon,
         size: 20,
-        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.8),
+        color: Theme.of(context).colorScheme.primary.withValues(alpha:0.8),
       ),
       title: Text(
         label,
@@ -493,17 +664,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
           fontWeight: FontWeight.w500,
         ),
       ),
-      subtitle: Text(
-        '$count 项',
-        style: const TextStyle(
-          fontSize: 12,
-          color: Color(0xFF8A8F98),
-        ),
-      ),
+      subtitle: subtitle != null
+          ? Text(
+              subtitle,
+              style: const TextStyle(
+                fontSize: 12,
+                color: ChartTheme.muted,
+              ),
+            )
+          : Text(
+              '$count 项',
+              style: const TextStyle(
+                fontSize: 12,
+                color: ChartTheme.muted,
+              ),
+            ),
       trailing: const Icon(
         Icons.chevron_right,
         size: 18,
-        color: Color(0xFF8A8F98),
+        color: ChartTheme.muted,
       ),
       onTap: onTap,
     );
@@ -553,9 +732,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               Expanded(
                 child: _shows.isEmpty
-                    ? Center(
-                        child: Text('暂无剧目',
-                            style: const TextStyle(color: Color(0xFF8A8F98))),
+                    ? const Center(
+                        child: Text(
+                          '暂无剧目',
+                          style: TextStyle(color: ChartTheme.muted),
+                        ),
                       )
                     : ListView.builder(
                         controller: scrollController,
@@ -612,9 +793,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         builder: (context, scrollController) {
           return Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: const Text(
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
                   '演员名单',
                   style: TextStyle(
                     fontSize: 18,
@@ -624,9 +805,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               Expanded(
                 child: _actors.isEmpty
-                    ? Center(
-                        child: Text('暂无演员',
-                            style: const TextStyle(color: Color(0xFF8A8F98))),
+                    ? const Center(
+                        child: Text(
+                          '暂无演员',
+                          style: TextStyle(color: ChartTheme.muted),
+                        ),
                       )
                     : ListView.builder(
                         controller: scrollController,
@@ -661,6 +844,94 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+class _MetricCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final String? subtitle;
+  final Color? accentColor;
+  final VoidCallback? onTap;
+
+  const _MetricCard({
+    required this.label,
+    required this.value,
+    this.subtitle,
+    this.accentColor,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final card = Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: ChartTheme.background,
+        borderRadius: BorderRadius.circular(ChartTheme.cardRadius),
+        boxShadow: accentColor != null
+            ? [
+                BoxShadow(
+                  color: accentColor!.withValues(alpha:0.12),
+                  blurRadius: 12,
+                  spreadRadius: 0,
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 10,
+              fontFamily: 'monospace',
+              color: ChartTheme.muted,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+                height: 1.1,
+                color: ChartTheme.value,
+              ),
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                subtitle!,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                  color: ChartTheme.muted,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    if (onTap == null) return card;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: card,
     );
   }
 }

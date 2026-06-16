@@ -17,6 +17,7 @@ class SimpleBarChart extends StatelessWidget {
   final String? title;
   final bool showValueLabels;
   final int? highlightIndex;
+  final void Function(int index)? onBarTap;
 
   const SimpleBarChart({
     super.key,
@@ -25,6 +26,7 @@ class SimpleBarChart extends StatelessWidget {
     this.title,
     this.showValueLabels = true,
     this.highlightIndex,
+    this.onBarTap,
   });
 
   @override
@@ -65,7 +67,7 @@ class SimpleBarChart extends StatelessWidget {
                   ? (activeColor ?? ChartTheme.primary)
                   : ChartTheme.barDefault;
 
-              return Column(
+              final column = Column(
                 children: [
                   if (showValueLabels && item.value > 0)
                     Text(
@@ -110,6 +112,16 @@ class SimpleBarChart extends StatelessWidget {
                   ),
                 ],
               );
+
+              if (onBarTap != null) {
+                return GestureDetector(
+                  onTap: () => onBarTap!(index),
+                  behavior: HitTestBehavior.opaque,
+                  child: column,
+                );
+              }
+
+              return column;
             }),
           ),
         ],

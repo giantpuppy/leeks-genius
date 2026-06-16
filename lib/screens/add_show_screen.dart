@@ -11,6 +11,7 @@ import '../models/actor.dart';
 import '../utils/ocr_service.dart';
 import '../utils/knowledge_base.dart';
 import '../utils/cover_helper.dart';
+import '../utils/status_colors.dart';
 
 class AddShowScreen extends StatefulWidget {
   final Show? initialShow;
@@ -86,18 +87,6 @@ class _AddShowScreenState extends State<AddShowScreen> {
   List<CastEntry>? _lastOcrRawResult;
   List<String> _actorNames = [];
   String? _coverPath;
-
-  // 8色卡映射
-  static const List<Color> _coverColors = [
-    Color(0xFF1A1A2E),
-    Color(0xFF16213E),
-    Color(0xFF0F3460),
-    Color(0xFF533483),
-    Color(0xFF2C3333),
-    Color(0xFF2D4040),
-    Color(0xFF3A3A3A),
-    Color(0xFF2D1B69),
-  ];
 
   static const List<String> _timePresets = ['14:00', '14:30', '19:00', '19:30'];
 
@@ -722,7 +711,14 @@ class _AddShowScreenState extends State<AddShowScreen> {
                 child: CircularProgressIndicator(strokeWidth: 2)),
             )
           else
-            TextButton(onPressed: _saveShow, child: const Text('保存')),
+            TextButton(
+              onPressed: _saveShow,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF6B5BCD),
+                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              child: const Text('保存'),
+            ),
         ],
       ),
       body: Form(
@@ -737,13 +733,22 @@ class _AddShowScreenState extends State<AddShowScreen> {
             // 排期场次标题
             Row(
               children: [
+                Container(
+                  width: 3,
+                  height: 16,
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6B5BCD),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
                 const Text('排期场次',
                     style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                 const Spacer(),
                 TextButton.icon(
                   onPressed: _addPerformance,
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('添加场次'),
+                  icon: const Icon(Icons.add, size: 16, color: Color(0xFF6B5BCD)),
+                  label: const Text('添加场次', style: TextStyle(color: Color(0xFF6B5BCD))),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                   ),
@@ -760,16 +765,17 @@ class _AddShowScreenState extends State<AddShowScreen> {
             // OCR识别按钮
             SizedBox(
               width: double.infinity,
-              child: OutlinedButton.icon(
+              child: FilledButton.icon(
                 onPressed: _isRecognizing ? null : _pickImageAndRecognize,
                 icon: _isRecognizing
                     ? const SizedBox(width: 16, height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : const Icon(Icons.document_scanner_outlined, size: 18),
                 label: Text(_isRecognizing ? '识别中...' : '图片识别卡司'),
-                style: OutlinedButton.styleFrom(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF6B5BCD),
+                  foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  side: const BorderSide(color: Color(0xFF3A3A3A)),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -787,6 +793,11 @@ class _AddShowScreenState extends State<AddShowScreen> {
   // ==================== 头部：海报 + 剧目信息 ====================
 
   Widget _buildHeaderSection() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final posterWidth = screenWidth * 0.22;
+    final posterHeight = posterWidth * 4 / 3;
+    final color = _getCoverColor();
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -794,11 +805,26 @@ class _AddShowScreenState extends State<AddShowScreen> {
         GestureDetector(
           onTap: _pickCoverImage,
           child: Container(
-            width: 90,
-            height: 120,
+            width: posterWidth,
+            height: posterHeight,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              color: _getCoverColor(),
+              borderRadius: BorderRadius.circular(12),
+              color: color,
+              gradient: _coverPath == null || _coverPath!.isEmpty
+                  ? LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [color, color.withValues(alpha: 0.6)],
+                    )
+                  : null,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.25),
+                  blurRadius: 12,
+                  spreadRadius: 0,
+                  offset: const Offset(0, 4),
+                ),
+              ],
               image: _coverPath != null && _coverPath!.isNotEmpty
                   ? DecorationImage(
                       image: FileImage(File(_coverPath!)),
@@ -811,32 +837,27 @@ class _AddShowScreenState extends State<AddShowScreen> {
                     alignment: Alignment.center,
                     children: [
                       // 剧名首字
-                      Text(
-                        _nameController.text.trim().isNotEmpty
-                            ? _nameController.text.trim().substring(0,
-                                _nameController.text.trim().length > 2
-                                    ? 2
-                                    : _nameController.text.trim().length)
-                            : '',
-                        style: const TextStyle(
-                          color: Colors.white24,
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      // 相机图标
-                      Positioned(
-                        bottom: 6,
-                        right: 6,
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: Colors.black45,
-                            borderRadius: BorderRadius.circular(6),
+                      if (_nameController.text.trim().isNotEmpty)
+                        Text(
+                          _nameController.text.trim().substring(0,
+                              _nameController.text.trim().length > 2
+                                  ? 2
+                                  : _nameController.text.trim().length),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.18),
+                            fontSize: posterWidth * 0.35,
+                            fontWeight: FontWeight.bold,
                           ),
-                          child: const Icon(Icons.camera_alt,
-                              size: 14, color: Colors.white70),
                         ),
+                      // 相机图标
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(Icons.camera_alt,
+                            size: posterWidth * 0.14, color: Colors.white70),
                       ),
                     ],
                   )
@@ -850,17 +871,7 @@ class _AddShowScreenState extends State<AddShowScreen> {
             children: [
               TextFormField(
                 controller: _nameController,
-                decoration: InputDecoration(
-                  hintText: '剧目名称',
-                  hintStyle: const TextStyle(color: Color(0xFF555555)),
-                  filled: true,
-                  fillColor: const Color(0xFF1F1F1F),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                ),
+                decoration: _inputDecoration('剧目名称'),
                 style: const TextStyle(fontSize: 15),
                 validator: (v) => (v == null || v.trim().isEmpty) ? '必填' : null,
                 onChanged: (_) => setState(() {}),
@@ -868,17 +879,7 @@ class _AddShowScreenState extends State<AddShowScreen> {
               const SizedBox(height: 10),
               TextFormField(
                 controller: _theaterController,
-                decoration: InputDecoration(
-                  hintText: '演出剧场',
-                  hintStyle: const TextStyle(color: Color(0xFF555555)),
-                  filled: true,
-                  fillColor: const Color(0xFF1F1F1F),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                ),
+                decoration: _inputDecoration('演出剧场'),
                 style: const TextStyle(fontSize: 15),
               ),
             ],
@@ -891,7 +892,29 @@ class _AddShowScreenState extends State<AddShowScreen> {
   Color _getCoverColor() {
     if (_coverPath != null && _coverPath!.isNotEmpty) return Colors.transparent;
     final id = widget.initialShow?.id ?? 0;
-    return _coverColors[id.abs() % _coverColors.length];
+    return kCoverColors[id.abs() % kCoverColors.length];
+  }
+
+  InputDecoration _inputDecoration(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.25)),
+      filled: true,
+      fillColor: const Color(0xFF1A1A1A),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFF6B5BCD), width: 1),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+    );
   }
 
   Future<void> _showActorPicker(int perfIndex, int roleIndex) async {
@@ -926,7 +949,7 @@ class _AddShowScreenState extends State<AddShowScreen> {
     const headerH = 32.0;
     const cellH = 38.0;
     const fixedW = dateW + timeW + 0.5;
-    const dividerColor = Color(0xFF222222);
+    const dividerColor = Color(0xFF2A2A2A);
     const headerBg = Color(0xFF1A1A1A);
 
     return Container(
@@ -998,7 +1021,7 @@ class _AddShowScreenState extends State<AddShowScreen> {
                           child: Center(
                             child: perf.dateController.text.isEmpty
                               ? Text('选择',
-                                  style: TextStyle(fontSize: 11, color: Colors.grey[500]))
+                                  style: TextStyle(fontSize: 11, color: const Color(0xFF6B5BCD).withValues(alpha: 0.85)))
                               : Text(dateText,
                                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
                           ),
@@ -1065,7 +1088,7 @@ class _AddShowScreenState extends State<AddShowScreen> {
                           child: GestureDetector(
                             onTap: _addRole,
                             child: Icon(Icons.add_circle_outline,
-                              size: 16, color: Colors.grey[500]),
+                              size: 16, color: const Color(0xFF6B5BCD).withValues(alpha: 0.85)),
                           ),
                         ),
                       ),

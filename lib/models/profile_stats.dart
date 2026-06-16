@@ -4,6 +4,19 @@ import '../models/cast_member.dart';
 
 enum TimeSlice { all, year, month }
 
+extension TimeSliceExt on TimeSlice {
+  String get label {
+    switch (this) {
+      case TimeSlice.all:
+        return '全部';
+      case TimeSlice.year:
+        return '本年';
+      case TimeSlice.month:
+        return '本月';
+    }
+  }
+}
+
 /// 个人中心统计数据聚合模型
 ///
 /// 将 UI 层的统计计算下沉到纯 Dart 模型，支持时间切片过滤。
@@ -12,9 +25,12 @@ class ProfileStats {
 
   // Hero 指标
   final int totalSessions;
+  final int watchedSessions;
+  final int upcomingSessions;
   final double totalPaid;
   final double faceValue;
   final double savedValue;
+  final double totalDurationHours;
   final int showsTracked;
 
   // 月度数据（12个月）
@@ -32,9 +48,12 @@ class ProfileStats {
   const ProfileStats({
     required this.timeSlice,
     required this.totalSessions,
+    required this.watchedSessions,
+    required this.upcomingSessions,
     required this.totalPaid,
     required this.faceValue,
     required this.savedValue,
+    required this.totalDurationHours,
     required this.showsTracked,
     required this.monthlySessions,
     required this.actorRanking,
@@ -61,11 +80,17 @@ class ProfileStats {
 
     // 已购买场次
     final boughtPerformances = filtered
-        .where((p) => p.status == 'bought' || _isWatched(p))
+        .where((p) => p.status == 'bought')
         .toList();
 
     // Hero 指标
     final totalSessions = boughtPerformances.length;
+    final now = DateTime.now();
+    final watchedSessions = boughtPerformances.where((p) {
+      final date = DateTime.tryParse(p.date);
+      return date != null && date.isBefore(now);
+    }).length;
+    final upcomingSessions = totalSessions - watchedSessions;
     final totalPaid = boughtPerformances.fold(
       0.0,
       (sum, p) => sum + (p.actualPrice ?? p.price ?? 0),
@@ -75,6 +100,7 @@ class ProfileStats {
       (sum, p) => sum + (p.price ?? 0),
     );
     final savedValue = faceValue - totalPaid > 0 ? faceValue - totalPaid : 0.0;
+    final totalDurationHours = totalSessions * 2.5;
 
     final boughtShowIds = boughtPerformances.map((p) => p.showId).toSet();
     final showsTracked = boughtShowIds.length;
@@ -127,9 +153,12 @@ class ProfileStats {
     return ProfileStats(
       timeSlice: slice,
       totalSessions: totalSessions,
+      watchedSessions: watchedSessions,
+      upcomingSessions: upcomingSessions,
       totalPaid: totalPaid,
       faceValue: faceValue,
       savedValue: savedValue,
+      totalDurationHours: totalDurationHours,
       showsTracked: showsTracked,
       monthlySessions: monthlySessions,
       actorRanking: actorRanking,
@@ -156,13 +185,6 @@ class ProfileStats {
           return true;
       }
     }).toList();
-  }
-
-  static bool _isWatched(Performance p) {
-    if (p.status != 'bought') return false;
-    final date = DateTime.tryParse(p.date);
-    if (date == null) return false;
-    return date.isBefore(DateTime.now());
   }
 
   static String _timeSlot(String? time) {

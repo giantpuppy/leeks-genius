@@ -3,7 +3,7 @@
 > **版本**: v1.0  
 > **日期**: 2026/06/01  
 > **状态**: 开发中（MVP 已完成，UI 优化进行中）  
-> **上次更新**: 2026/06/16 — 票根卡片：日期置顶，座位紧跟日期下一行，剧名+剧场置底
+> **上次更新**: 2026/06/17 — 排期页交互最终调整：左上角月份标题移除管理台入口；右上角保持管理台入口；底部「排期」tab 使用自定义 3横线/7横线图标，模式切换由该 tab 承担
 
 ---
 
@@ -11,6 +11,10 @@
 
 | 日期 | 改动内容 | 关联文件/模块 |
 |------|---------|-------------|
+| 2026/06/17 | 排期页交互最终调整：左上角月份标题移除点击跳转管理台功能（仅作标题展示）；右上角保留直接跳转管理台入口。底部「排期」tab 图标改为自定义 `ScheduleTabIcon`：3天聚焦模式显示 3 条横线，7天宏观模式显示 7 条横线，带 200ms 淡入缩放动画；模式切换继续由该 tab 在「已在排期页」时承担 | `gantt_screen.dart`, `main_screen.dart`, `schedule_tab_icon.dart` |
+| 2026/06/17 | 排期页交互调整：右上角紫色按钮从底部 sheet 改为直接跳转 `MonthlyWorkbenchScreen` 管理台；清理失效的 `_showManagementMenu`/`_showAddMenu`/`_pickImageAndRecognize` 及对应 OCR 导入；空状态提示更新。底部「排期」tab 图标改为根据当前 3天/7天模式动态显示 `view_column`/`view_week`，并带 200ms 淡入缩放切换动画；已在排期页时点击该 tab 调用 `GanttScreenState.toggleMode()` 切换模式，从其他 tab 首次点击仅导航到排期页 | `gantt_screen.dart`, `main_screen.dart` |
+| 2026/06/17 | 月历首页阶段三：与排期板视觉统一——today 单元格/无演出 today 单元格加 `WarmSpotlight` 紫色追光；海报单元格加顶部渐变蒙层、1px 白边、紫色 today 角标；选中态/周视图显示迷你 `StatusBadge`；票根卡片加 `coverColorForShow` 环境光晕。个人中心数据联动——`CalendarScreen` 新增 `initialFilter`/`initialFocusedDay`；Hero 指标卡片（已观演/已购买/关注剧目/已买场次）点击跳转对应过滤月历；月度柱状图 bar 点击跳转对应月份 | `calendar_poster_cell.dart`, `calendar_cell.dart`, `calendar_screen.dart`, `profile_screen.dart`, `simple_bar_chart.dart` |
+| 2026/06/16 | 排期管理台重构：海报网格画廊、年月选择器（箭头+picker+滑动）、新建剧目管理页、长按不实现 | `monthly_workbench_screen.dart`, `show_management_screen.dart`, `status_colors.dart` |
 | 2026/06/15 | 月历首页反馈优化：月历容器高度精确为 6 行 + 分割线/手柄区余量；分割线上提至第六排下方并进一步调紧余量，月历底部叠加渐变遮罩、分割线下方增加向下渐变过渡，形成柔和预览感；月视图下 `CustomScrollView` 禁用滚动并只显示单张票根预览，上滑切换为周视图后下方票根列表可滚动；`_onHeaderHorizontalSwipe` 区分月/周视图，月视图切换月份、周视图切换周目；新增 `_changeWeek` 处理跨月事件加载与选中日期跟随；TableCalendar 格式动画从 1ms 调至 120ms，垂直切换阈值从 150 降至 100 | `calendar_screen.dart` |
 | 2026/06/15 | Tab 栏半透明毛玻璃背景，选中 icon 紫色发光高亮（无灰色药丸蒙版）；海报 cell 恢复层叠小卡，日期数字贴左上角，开场时间居中显示，右下角显示总张数，选中态移除剧名+剧场名浮层；删除 `poster_grid.dart` | `main_screen.dart`, `main.dart`, `calendar_poster_cell.dart` |
 | 2026/06/15 | 海报单元格视觉重设计：去掉日期/时间黑底胶囊；日期改为白字+细阴影压在左上角；开场时间移到底部黑色渐变条；张数角标改为半透明白边小胶囊；新增同天二次点击循环轮换层叠海报交互，切换时顶层海报淡入淡出、底部时间同步更新；底部 Tab 栏点击水波纹去除 | `calendar_poster_cell.dart`, `calendar_cell.dart`, `calendar_screen.dart`, `main_screen.dart` |
