@@ -420,16 +420,20 @@ class _CalendarScreenState extends State<CalendarScreen> {
               ),
             ),
             actions: [
-              if (_isFilterExpanded) ...[
-                _buildFilterBar(),
-                const SizedBox(width: 4),
-              ] else ...[
-                _buildFilterToggle(),
-              ],
+              _buildFilterToggle(),
               const SizedBox(width: 8),
             ],
             foregroundColor: Colors.white,
           ),
+
+          // 筛选栏（展开时显示）
+          if (_isFilterExpanded)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: _buildFilterBar(),
+              ),
+            ),
 
           // 星期标题（固定）
           SliverPersistentHeader(
