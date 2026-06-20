@@ -96,8 +96,6 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
   bool _isLoadingMore = false;
   bool _isSnapping = false;
   Timer? _snapTimer;
-  bool _isTransitioning = false; // 模式切换过渡中，封锁重复切换
-  bool _justSwitched = false;     // 刚刚切换完，短暂封锁磁吸避免干扰
 
   // 动态行高：由 LayoutBuilder 实时更新
   double _availableHeight = 800.0; // 默认值，首次布局后更新
@@ -157,7 +155,7 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
 
   /// 滚动到顶部/底部时追加更多天
   void _onScroll() {
-    if (_isLoadingMore || _isSnapping || _isTransitioning) return;
+    if (_isLoadingMore || _isSnapping) return;
     if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
       _appendDays();
     } else if (_scrollController.position.pixels <= 200) {
@@ -562,7 +560,7 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
 
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
-        if (notification is ScrollEndNotification && !_isSnapping && !_isTransitioning && !_justSwitched) {
+        if (notification is ScrollEndNotification && !_isSnapping) {
           _snapTimer?.cancel();
           _snapTimer = Timer(const Duration(milliseconds: 150), _snapToNearestRow);
         }
@@ -575,6 +573,7 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
             controller: _scrollController,
             padding: EdgeInsets.zero,
             itemCount: _days.length,
+            itemExtent: _currentRowHeight, // 告诉 ListView 每行固定高度
             itemBuilder: (context, index) {
               return _buildDayRow(index, today, _focalDayIndex.value);
             },
@@ -587,7 +586,7 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
   // ==================== 磁吸滚动 ====================
 
   void _snapToNearestRow() {
-    if (!_scrollController.hasClients || _isTransitioning || _justSwitched) return;
+    if (!_scrollController.hasClients || _isSnapping) return;
     final rowHeight = _currentRowHeight;
     if (rowHeight <= 0) return;
     final offset = _scrollController.offset;
@@ -602,54 +601,34 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
     }
   }
 
-  // ==================== 丝滑模式切换 ====================
+  // ==================== 模式切换 ====================
+  // 先 setState 切模式（itemExtent 立即生效），再 postFrameCallback jumpTo 对齐。
+  // itemExtent 模式下 ListView 的 scroll geometry 更可靠。
 
   void _switchMode(TimelineMode newMode) {
-    if (_mode == newMode || _isTransitioning) return;
-
+    if (_mode == newMode) return;
     _snapTimer?.cancel();
 
-    // 保存切换前的关键状态
-    final previousOffset = _scrollController.offset;
-    final previousMode = _mode;
-
-    _isTransitioning = true;
+    final focalIndex = _focalDayIndex.value;
     setState(() => _mode = newMode);
     modeNotifier.value = newMode;
 
-    // 所有计算和滚动调整在布局完成后执行，确保使用最新的行高和 maxScrollExtent
+    // postFrameCallback：新 itemExtent 已生效，jumpTo 对齐焦点行
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        _isTransitioning = false;
-        return;
-      }
-      if (_scrollController.hasClients && _availableHeight > 0) {
-        // 在 post frame 中重新计算行高，确保 _availableHeight 已更新
-        final oldRowHeight = previousMode == TimelineMode.focus3Day ? _focusRowHeight : _microRowHeight;
-        final newRowHeight = _mode == TimelineMode.focus3Day ? _focusRowHeight : _microRowHeight;
-
-        // 防御除零：布局异常时直接跳过滚动调整
-        if (oldRowHeight <= 0 || newRowHeight <= 0) {
-          _isTransitioning = false;
-          return;
-        }
-
-        // 以屏幕中心日期为锚点，切换后让它仍位于屏幕中心
-        final viewportCenter = previousOffset + _availableHeight / 2;
-        final focalIndex = (viewportCenter / oldRowHeight).round().clamp(0, _days.length - 1);
-        final targetOffset = (focalIndex * newRowHeight) - (_availableHeight - newRowHeight) / 2;
-
-        _scrollController.jumpTo(
-          targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
-        );
-        _updateMonthTitle();
-      }
-      // jumpTo 后强制 rebuild，让 _buildMonthTitle 使用新的 offset 计算正确月份
+      if (!mounted || !_scrollController.hasClients || _availableHeight <= 0) return;
+      final newRowHeight = _currentRowHeight;
+      if (newRowHeight <= 0) return;
+      final targetOffset =
+          (focalIndex * newRowHeight) - (_availableHeight - newRowHeight) / 2;
+      _isSnapping = true;
+      _scrollController.jumpTo(
+        targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      );
+      _isSnapping = false;
+      _focalDayIndex.value = focalIndex;
+      _monthTitle.value =
+          '${_days[focalIndex].year}年${_days[focalIndex].month}月';
       if (mounted) setState(() {});
-      _isTransitioning = false;
-      // 短暂标记刚刚切换完，阻止磁吸干扰 jumpTo 后的位置
-      _justSwitched = true;
-      Future.delayed(const Duration(milliseconds: 300), () => _justSwitched = false);
     });
   }
 
