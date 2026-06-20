@@ -419,7 +419,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
               ),
             ),
             actions: [
-              _buildFilterButton(),
+              _buildFilterBar(),
               const SizedBox(width: 8),
             ],
             foregroundColor: Colors.white,
@@ -985,100 +985,73 @@ class _CalendarScreenState extends State<CalendarScreen> {
     }
   }
 
-  Widget _buildFilterButton() {
-    final filterColor =
-        _filter == CalendarFilter.all ? null : _statusColorForFilter(_filter);
-
-    return IconButton(
-      icon: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFF181818),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color:
-                filterColor?.withValues(alpha: 0.3) ?? const Color(0xFF2A2A2A),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (filterColor != null) ...[
-              StatusDot(color: filterColor, size: 6),
-              const SizedBox(width: 6),
-            ],
-            const Icon(Icons.tune, size: 18),
-          ],
-        ),
+  Widget _buildFilterBar() {
+    final filters = [
+      (CalendarFilter.all, '全部', null),
+      (CalendarFilter.wantToSee, '想看', const Color(0xFF811FE2)),
+      (CalendarFilter.bought, '已买', const Color(0xFF34D399)),
+      (CalendarFilter.watched, '已看', const Color(0xFFD4A853)),
+    ];
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF2A2A2A), width: 0.5),
       ),
-      onPressed: _showFilterMenu,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(),
-    );
-  }
-
-  void _showFilterMenu() async {
-    final RenderBox button = context.findRenderObject() as RenderBox;
-    final RenderBox overlay =
-        Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
-    final position = RelativeRect.fromRect(
-      Rect.fromPoints(
-        button.localToGlobal(button.size.topRight(Offset.zero),
-            ancestor: overlay),
-        button.localToGlobal(button.size.bottomRight(Offset.zero),
-            ancestor: overlay),
-      ),
-      Offset.zero & overlay.size,
-    );
-
-    final result = await showMenu<CalendarFilter>(
-      context: context,
-      position: position,
-      color: const Color(0xFF1E1E1E),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      items: CalendarFilter.values
-          .map((filter) => _buildFilterMenuItem(filter))
-          .toList(),
-    );
-
-    if (result != null && result != _filter) {
-      setState(() => _filter = result);
-      _loadEventsForMonth(_focusedDay);
-      _loadPerformancesForDate(_selectedDay ?? _focusedDay);
-    }
-  }
-
-  PopupMenuItem<CalendarFilter> _buildFilterMenuItem(CalendarFilter filter) {
-    final isSelected = _filter == filter;
-    final color = _statusColorForFilter(filter);
-    return PopupMenuItem(
-      value: filter,
       child: Row(
-        children: [
-          if (filter != CalendarFilter.all) ...[
-            StatusDot(color: color, size: 8),
-            const SizedBox(width: 12),
-          ] else
-            const SizedBox(width: 20),
-          Text(
-            filter.label,
-            style: TextStyle(
-              fontSize: 14,
-              color: isSelected
-                  ? (filter == CalendarFilter.all ? Colors.white : color)
-                  : const Color(0xFFB3B3B3),
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+        mainAxisSize: MainAxisSize.min,
+        children: filters.map((f) {
+          final isActive = _filter == f.$1;
+          final color = f.$3 ?? const Color(0xFF6B5BCD);
+          return GestureDetector(
+            onTap: () {
+              if (_filter != f.$1) {
+                setState(() => _filter = f.$1);
+                _loadEventsForMonth(_focusedDay);
+                _loadPerformancesForDate(_selectedDay ?? _focusedDay);
+              }
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: isActive ? const Color(0xFF2A2A2A) : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: isActive ? [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.15),
+                    blurRadius: 8,
+                    spreadRadius: 0,
+                  ),
+                ] : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (f.$3 != null) ...[
+                    Container(
+                      width: 5, height: 5,
+                      decoration: BoxDecoration(
+                        color: isActive ? color : color.withValues(alpha: 0.4),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Text(
+                    f.$2,
+                    style: TextStyle(
+                      color: isActive ? Colors.white : const Color(0xFF6B6B6B),
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          if (isSelected) ...[
-            const Spacer(),
-            Icon(
-              Icons.check,
-              size: 16,
-              color: filter == CalendarFilter.all ? Colors.white : color,
-            ),
-          ],
-        ],
+          );
+        }).toList(),
       ),
     );
   }
@@ -1131,7 +1104,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             BreathingIcon(icon: Icons.bookmark_border),
             SizedBox(height: 16),
             Text(
-              '今日无标记场次',
+              '本日暂无场次',
               style: TextStyle(color: Color(0xFF8A8F98)),
             ),
             SizedBox(height: 8),

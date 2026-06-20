@@ -1446,7 +1446,7 @@ class _ShowManagementSheetState extends State<_ShowManagementSheet> {
                       children: [
                         Icon(Icons.event_busy, size: 40, color: Colors.white.withValues(alpha: 0.15)),
                         const SizedBox(height: 12),
-                        Text('本日暂无场次',
+                        Text(_filter == _ShowFilter.all ? '暂无排期' : '暂无符合条件的排期',
                             style: const TextStyle(color: Color(0xFF8A8F98), fontSize: 14)),
                       ],
                     ),
@@ -1636,63 +1636,36 @@ class _ShowManagementSheetState extends State<_ShowManagementSheet> {
       (_ShowFilter.all, '全部', null),
       (_ShowFilter.wantToSee, '想看', const Color(0xFF811FE2)),
       (_ShowFilter.bought, '已买', const Color(0xFF34D399)),
-      (_ShowFilter.watched, '已看', const Color(0xFFD4A853)),
+      (_ShowFilter.watched, '已观演', const Color(0xFF9CA3AF)),
     ];
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF2A2A2A), width: 0.5),
-      ),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: filters.map((f) {
           final isActive = _filter == f.$1;
           final color = f.$3 ?? const Color(0xFF6B5BCD);
-          return Expanded(
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
             child: GestureDetector(
               onTap: () => setState(() => _filter = f.$1),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 7),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
-                  color: isActive ? const Color(0xFF2A2A2A) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: isActive ? [
-                    BoxShadow(
-                      color: color.withValues(alpha: 0.15),
-                      blurRadius: 8,
-                      spreadRadius: 0,
-                    ),
-                  ] : null,
+                  color: isActive ? color.withValues(alpha: 0.15) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isActive ? color.withValues(alpha: 0.4) : const Color(0xFF2A2A2A),
+                    width: 1,
+                  ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (f.$3 != null) ...[
-                      Container(
-                        width: 5, height: 5,
-                        decoration: BoxDecoration(
-                          color: isActive ? color : color.withValues(alpha: 0.4),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                    ],
-                    Flexible(
-                      child: Text(
-                        f.$2,
-                        style: TextStyle(
-                          color: isActive ? Colors.white : const Color(0xFF6B6B6B),
-                          fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                          fontSize: 12.5,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  f.$2,
+                  style: TextStyle(
+                    color: isActive ? color : const Color(0xFF8A8F98),
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ),
