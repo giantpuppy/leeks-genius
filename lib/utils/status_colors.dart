@@ -45,11 +45,13 @@ Color statusColor(String status) {
 ///
 /// - want_to_see: 星星
 /// - watched: 眼睛
+/// - bought: 票根
 /// - 其他：对勾
 IconData statusIcon(String status) {
   return switch (status) {
     'want_to_see' => Icons.star_border,
     'watched' => Icons.visibility_outlined,
+    'bought' => Icons.confirmation_num,
     _ => Icons.check_circle,
   };
 }
