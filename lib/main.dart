@@ -15,7 +15,19 @@ void main() async {
 
   final autoLoginUser = await UserService.getAutoLoginUser();
   final currentUser = await UserService.getCurrentUsername();
-  final effectiveUser = autoLoginUser ?? currentUser;
+  String? effectiveUser = autoLoginUser ?? currentUser;
+
+  // Web 演示模式：没有用户时自动创建 demo 账号并导入演示数据
+  // 这样评委/观众扫码打开的线上预览不会是一片空白
+  if (effectiveUser == null && kIsWeb) {
+    const demoUsername = 'demo';
+    final users = await UserService.getAllUsers();
+    if (!users.any((u) => u.username == demoUsername)) {
+      await UserService.register(demoUsername, 'demo123');
+    }
+    await UserService.setAutoLoginUser(demoUsername);
+    effectiveUser = demoUsername;
+  }
 
   if (effectiveUser != null) {
     await DatabaseHelper.switchUser(effectiveUser);

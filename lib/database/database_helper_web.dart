@@ -51,6 +51,7 @@ class _WebDB {
             if (entry.key == 'performances') {
               if (!row.containsKey('status')) row['status'] = 'unmarked';
               if (!row.containsKey('actual_price')) row['actual_price'] = null;
+              if (!row.containsKey('is_in_schedule_flow')) row['is_in_schedule_flow'] = 0;
             }
             if (entry.key == 'cast_members' && !row.containsKey('is_featured')) {
               row['is_featured'] = 0;
@@ -154,6 +155,24 @@ class _WebDB {
           }
         }
         _tables['_v12_migrated'] = [{'done': true}];
+        await _save();
+      }
+
+      // v13 迁移：为 performances 增加 is_in_schedule_flow 字段，默认 0
+      // 并把现有 shows.is_in_schedule_flow = 1 的剧目的所有场次同步标记为 1
+      if (!_tables.containsKey('_v13_migrated')) {
+        final perfs = _tables['performances'] ?? [];
+        final shows = _tables['shows'] ?? [];
+        final flowShowIds = shows
+            .where((s) => (s['is_in_schedule_flow'] as int?) == 1)
+            .map((s) => s['id'])
+            .toSet();
+        for (final p in perfs) {
+          if (!p.containsKey('is_in_schedule_flow')) {
+            p['is_in_schedule_flow'] = flowShowIds.contains(p['show_id']) ? 1 : 0;
+          }
+        }
+        _tables['_v13_migrated'] = [{'done': true}];
         await _save();
       }
       print('[WebDB] Data loaded successfully for $_storageKey');
@@ -335,7 +354,7 @@ class _WebDB {
         'show_name': show['name'],
         'theater': show['theater'],
         'cover_path': show['cover_path'],
-        'is_in_schedule_flow': show['is_in_schedule_flow'] ?? 0,
+        'is_in_schedule_flow': p['is_in_schedule_flow'] ?? 0,
       });
     }
     results.sort((a, b) {
@@ -402,6 +421,7 @@ class DatabaseHelper {
         price REAL,
         actual_price REAL,
         status TEXT DEFAULT 'unmarked',
+        is_in_schedule_flow INTEGER DEFAULT 0,
         created_at TEXT,
         FOREIGN KEY (show_id) REFERENCES shows (id) ON DELETE CASCADE
       )
@@ -845,18 +865,26 @@ class DatabaseHelper {
     // 备份旧场次 ticket（按 date|time 匹配）
     final oldPerfs = await db.query('performances', where: 'show_id = ?', whereArgs: [showId]);
     final oldTickets = <String, Map<String, dynamic>>{};
+    final oldFlowFlags = <String, bool>{};
     for (final p in oldPerfs) {
       final perfId = p['id'] as int;
+      final key = '${p['date']}|${p['time']}';
+      oldFlowFlags[key] = (p['is_in_schedule_flow'] as int?) == 1;
       final tickets = await db.query('tickets', where: 'performance_id = ?', whereArgs: [perfId]);
       if (tickets.isNotEmpty) {
-        oldTickets['${p['date']}|${p['time']}'] = tickets.first;
+        oldTickets[key] = tickets.first;
       }
     }
     await db.delete('performances', where: 'show_id = ?', whereArgs: [showId]);
     for (final data in perfDataList) {
       final perf = data['performance'] as Performance;
       final casts = data['casts'] as List<CastMember>;
-      final perfMap = perf.toMap();
+      final key = '${perf.date}|${perf.time}';
+      final flowFlag = oldFlowFlags[key];
+      final perfToInsert = flowFlag != null
+          ? perf.copyWith(isInScheduleFlow: flowFlag)
+          : perf;
+      final perfMap = perfToInsert.toMap();
       perfMap.remove('id');
       final perfId = await db.insert('performances', perfMap);
       for (final cast in casts) {
@@ -865,7 +893,7 @@ class DatabaseHelper {
         await db.insert('cast_members', castMap);
       }
       // 恢复旧 ticket
-      final oldTicket = oldTickets['${perf.date}|${perf.time}'];
+      final oldTicket = oldTickets[key];
       if (oldTicket != null) {
         await db.insert('tickets', {
           'performance_id': perfId,

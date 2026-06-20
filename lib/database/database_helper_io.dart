@@ -45,7 +45,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -178,6 +178,24 @@ class DatabaseHelper {
     try {
       await db.execute('UPDATE shows SET is_in_schedule_flow = 0 WHERE is_in_schedule_flow IS NULL');
     } catch (_) {}
+
+    // v13: 增加 performances.is_in_schedule_flow 字段，默认 0（管理台）
+    // 并将现有 shows.is_in_schedule_flow = 1 的剧目的所有场次同步标记为 1
+    try {
+      await db.execute('ALTER TABLE performances ADD COLUMN is_in_schedule_flow INTEGER DEFAULT 0');
+    } catch (_) {}
+    try {
+      await db.execute('UPDATE performances SET is_in_schedule_flow = 0 WHERE is_in_schedule_flow IS NULL');
+    } catch (_) {}
+    try {
+      await db.execute('''
+        UPDATE performances
+        SET is_in_schedule_flow = 1
+        WHERE show_id IN (
+          SELECT id FROM shows WHERE is_in_schedule_flow = 1
+        )
+      ''');
+    } catch (_) {}
   }
 
   Future _createDB(Database db, int version) async {
@@ -202,6 +220,7 @@ class DatabaseHelper {
         price REAL,
         actual_price REAL,
         status TEXT DEFAULT 'unmarked',
+        is_in_schedule_flow INTEGER DEFAULT 0,
         created_at TEXT,
         FOREIGN KEY (show_id) REFERENCES shows (id) ON DELETE CASCADE
       )
@@ -637,22 +656,24 @@ class DatabaseHelper {
   Future<void> replaceAllPerformances(int showId, List<Map<String, dynamic>> perfDataList) async {
     final db = await instance.database;
     await db.transaction((txn) async {
-      // 0. 先备份旧场次及其 ticket，以便在重建后恢复票根数据
+      // 0. 先备份旧场次及其 ticket/is_in_schedule_flow，以便在重建后恢复
       final oldPerfRows = await txn.query(
         'performances',
         where: 'show_id = ?',
         whereArgs: [showId],
       );
       final oldTickets = <String, Map<String, dynamic>>{};
+      final oldFlowFlags = <String, bool>{};
       for (final row in oldPerfRows) {
         final perfId = row['id'] as int;
+        final key = '${row['date']}|${row['time']}';
+        oldFlowFlags[key] = (row['is_in_schedule_flow'] as int?) == 1;
         final ticketRows = await txn.query(
           'tickets',
           where: 'performance_id = ?',
           whereArgs: [perfId],
         );
         if (ticketRows.isNotEmpty) {
-          final key = '${row['date']}|${row['time']}';
           oldTickets[key] = ticketRows.first;
         }
       }
@@ -664,8 +685,14 @@ class DatabaseHelper {
       for (final data in perfDataList) {
         final perf = data['performance'] as Performance;
         final casts = data['casts'] as List<CastMember>;
+        // 若同 date|time 的旧场次有 is_in_schedule_flow，继承该状态
+        final key = '${perf.date}|${perf.time}';
+        final flowFlag = oldFlowFlags[key];
+        final perfToInsert = flowFlag != null
+            ? perf.copyWith(isInScheduleFlow: flowFlag)
+            : perf;
         // 清理 id 防止旧 id 冲突（与 web 端行为一致）
-        final perfMap = perf.toMap()..remove('id');
+        final perfMap = perfToInsert.toMap()..remove('id');
         final perfId = await txn.insert('performances', perfMap);
         for (final cast in casts) {
           final castMap = cast.copyWith(performanceId: perfId).toMap()..remove('id');
@@ -673,7 +700,6 @@ class DatabaseHelper {
         }
 
         // 3. 如果同 date|time 的旧场次有 ticket，恢复票根数据
-        final key = '${perf.date}|${perf.time}';
         final oldTicket = oldTickets[key];
         if (oldTicket != null) {
           await txn.insert('tickets', {
@@ -729,7 +755,7 @@ class DatabaseHelper {
       SELECT p.*, s.name as show_name, s.theater, s.cover_path
       FROM performances p
       JOIN shows s ON p.show_id = s.id
-      WHERE s.is_in_schedule_flow = 1
+      WHERE p.is_in_schedule_flow = 1
       ORDER BY p.date ASC, p.time ASC
     ''');
   }
@@ -742,7 +768,7 @@ class DatabaseHelper {
       SELECT p.*, s.name as show_name, s.theater, s.cover_path
       FROM performances p
       JOIN shows s ON p.show_id = s.id
-      WHERE s.is_in_schedule_flow = 1 AND p.date >= ? AND p.date <= ?
+      WHERE p.is_in_schedule_flow = 1 AND p.date >= ? AND p.date <= ?
       ORDER BY p.date ASC, p.time ASC
     ''', [startDate, endDate]);
   }
@@ -758,7 +784,7 @@ class DatabaseHelper {
       FROM performances p
       JOIN shows s ON p.show_id = s.id
       LEFT JOIN tickets t ON t.performance_id = p.id
-      WHERE s.is_in_schedule_flow = 1 AND p.date = ?
+      WHERE p.is_in_schedule_flow = 1 AND p.date = ?
       ORDER BY p.time ASC
     ''', [date]);
   }
@@ -772,7 +798,7 @@ class DatabaseHelper {
       SELECT p.*, s.name as show_name, s.theater, s.cover_path
       FROM performances p
       JOIN shows s ON p.show_id = s.id
-      WHERE s.is_in_schedule_flow = 1 AND p.date LIKE ?
+      WHERE p.is_in_schedule_flow = 1 AND p.date LIKE ?
       ORDER BY s.name ASC, p.date ASC, p.time ASC
     ''', ['$year-$monthStr%']);
   }

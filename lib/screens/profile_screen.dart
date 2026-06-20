@@ -53,6 +53,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       monthlySessions: List.generate(12, (_) => 0),
       actorRanking: const [],
       theaterDistribution: const [],
+      showRanking: const [],
       timeSlotDistribution: const {'下午场': 0, '傍晚场': 0, '晚场': 0},
       wantToSeePerformances: const [],
     );
@@ -175,10 +176,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           : CustomScrollView(
               slivers: [
                 SliverToBoxAdapter(child: _buildHeader()),
-                SliverToBoxAdapter(child: _buildHeroMetrics()),
+                SliverToBoxAdapter(child: _buildTotalSessionsHero()),
                 SliverToBoxAdapter(child: _buildTimeSliceController()),
-                SliverToBoxAdapter(child: _buildMonthlyChart()),
+                SliverToBoxAdapter(child: _buildShowRankingChart()),
                 SliverToBoxAdapter(child: _buildChartGrid()),
+                SliverToBoxAdapter(child: _buildAmountCard()),
+                SliverToBoxAdapter(child: _buildStatusCards()),
+                SliverToBoxAdapter(child: _buildMonthlyChart()),
                 SliverToBoxAdapter(child: _buildShowLists()),
                 SliverToBoxAdapter(child: _buildFavoritePlaceholder()),
                 const SliverToBoxAdapter(child: SizedBox(height: 32)),
@@ -255,96 +259,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildHeroMetrics() {
+  Widget _buildTotalSessionsHero() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: _MetricCard(
-              label: '已观演',
-              value: '${_stats.watchedSessions}',
-              onTap: () => _navigateToCalendar(CalendarFilter.watched),
+      child: GlowCard(
+        padding: const EdgeInsets.all(ChartTheme.cardPadding),
+        borderRadius: ChartTheme.cardRadius,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '观看总场次',
+              style: TextStyle(
+                fontSize: ChartTheme.titleFontSize,
+                fontWeight: FontWeight.w600,
+                color: ChartTheme.label,
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _MetricCard(
-              label: '已购买',
-              value: '${_stats.upcomingSessions}',
-              onTap: () => _navigateToCalendar(CalendarFilter.bought),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _MetricCard(
-              label: '观演花费',
-              value: '¥${_formatCurrency(_stats.totalPaid)}',
-              subtitle: '省 ¥${_formatCurrency(_stats.savedValue)}',
-              onTap: _showMoreMetricsSheet,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showMoreMetricsSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '更多数据',
-                style: TextStyle(
-                  fontSize: 17,
+            const SizedBox(height: 12),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${_stats.totalSessions}',
+                style: const TextStyle(
+                  fontSize: 48,
                   fontWeight: FontWeight.bold,
+                  fontFamily: 'monospace',
                   color: Colors.white,
                 ),
               ),
-              const SizedBox(height: 20),
-              _buildMoreMetricRow('总场次', '${_stats.totalSessions}'),
-              _buildMoreMetricRow('观演时长', '${_stats.totalDurationHours.toStringAsFixed(1)}h'),
-              _buildMoreMetricRow('票面总价', '¥${_formatCurrency(_stats.faceValue)}'),
-              _buildMoreMetricRow('关注剧目', '${_stats.showsTracked}'),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildMoreMetricRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.white.withValues(alpha: 0.6),
             ),
-          ),
-          const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
+            const SizedBox(height: 8),
+            Text(
+              '覆盖 ${_stats.showsTracked} 部剧目',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.white.withValues(alpha: 0.45),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -398,6 +353,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildShowRankingChart() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      child: _stats.showRanking.isEmpty
+          ? _buildEmptyChartPlaceholder(title: '观看剧目排序')
+          : GlowCard(
+              padding: const EdgeInsets.all(ChartTheme.cardPadding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '观看剧目排序',
+                    style: TextStyle(
+                      fontSize: ChartTheme.titleFontSize,
+                      fontWeight: FontWeight.w600,
+                      color: ChartTheme.label,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  HorizontalBarChart(
+                    data: _stats.showRanking
+                        .map((e) => ChartData(label: e.key, value: e.value))
+                        .toList(),
+                    accentColor: ChartTheme.primary,
+                    displayCount: 5,
+                  ),
+                ],
+              ),
+            ),
     );
   }
 
@@ -580,6 +567,122 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ChartTheme.bought,
                   ],
                 ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAmountCard() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+      child: GlowCard(
+        padding: const EdgeInsets.all(ChartTheme.cardPadding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '金额统计',
+              style: TextStyle(
+                fontSize: ChartTheme.titleFontSize,
+                fontWeight: FontWeight.w600,
+                color: ChartTheme.label,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '实付金额',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: ChartTheme.muted,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '¥${_formatCurrency(_stats.totalPaid)}',
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'monospace',
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '票面金额',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: ChartTheme.muted,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '¥${_formatCurrency(_stats.faceValue)}',
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'monospace',
+                            color: ChartTheme.watched,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '省钱 ¥${_formatCurrency(_stats.savedValue)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.white.withValues(alpha: 0.45),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusCards() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: _MetricCard(
+              label: '已购买',
+              value: '${_stats.upcomingSessions}',
+              accentColor: ChartTheme.bought,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _MetricCard(
+              label: '已观演',
+              value: '${_stats.watchedSessions}',
+              accentColor: ChartTheme.watched,
+            ),
+          ),
         ],
       ),
     );
@@ -967,22 +1070,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
 class _MetricCard extends StatelessWidget {
   final String label;
   final String value;
-  final String? subtitle;
-  final VoidCallback? onTap;
+  final Color? accentColor;
 
   const _MetricCard({
     required this.label,
     required this.value,
-    this.subtitle,
-    this.onTap,
+    this.accentColor,
   });
 
   @override
   Widget build(BuildContext context) {
     return GlowCard(
-      onTap: onTap,
       padding: const EdgeInsets.all(14),
       borderRadius: ChartTheme.cardRadius,
+      glowColor: accentColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1010,21 +1111,6 @@ class _MetricCard extends StatelessWidget {
               ),
             ),
           ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 4),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                subtitle!,
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontFamily: 'monospace',
-                  color: ChartTheme.muted,
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );

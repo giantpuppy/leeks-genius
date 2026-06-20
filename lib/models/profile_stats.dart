@@ -43,6 +43,9 @@ class ProfileStats {
   // 剧场分布
   final List<MapEntry<String, int>> theaterDistribution;
 
+  // 剧目排名
+  final List<MapEntry<String, int>> showRanking;
+
   // 时段偏好
   final Map<String, int> timeSlotDistribution;
 
@@ -62,6 +65,7 @@ class ProfileStats {
     required this.monthlySessions,
     required this.actorRanking,
     required this.theaterDistribution,
+    required this.showRanking,
     required this.timeSlotDistribution,
     required this.wantToSeePerformances,
   });
@@ -160,6 +164,18 @@ class ProfileStats {
     final theaterDistribution = theaterCounts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
+    // 剧目排名
+    final showCounts = <String, int>{};
+    for (final p in boughtPerformances) {
+      final show = shows.firstWhere(
+        (s) => s.id == p.showId,
+        orElse: () => Show(name: '未知剧目'),
+      );
+      showCounts[show.name] = (showCounts[show.name] ?? 0) + 1;
+    }
+    final showRanking = showCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
     // 时段偏好
     final timeSlotCounts = <String, int>{
       '下午场': 0,
@@ -184,6 +200,7 @@ class ProfileStats {
       monthlySessions: monthlySessions,
       actorRanking: actorRanking,
       theaterDistribution: theaterDistribution,
+      showRanking: showRanking,
       timeSlotDistribution: timeSlotCounts,
       wantToSeePerformances: wantToSeePerformances,
     );

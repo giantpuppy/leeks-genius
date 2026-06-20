@@ -1,11 +1,11 @@
 {
-    "name": "paiqi_app",
-    "short_name": "paiqi_app",
+    "name": "排期天菜",
+    "short_name": "排期天菜",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0F0F0F",
+    "theme_color": "#8B5CF6",
+    "description": "韭菜的自我管理剧历。让每一张票，都有处安放。",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

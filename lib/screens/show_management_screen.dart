@@ -1,18 +1,19 @@
-import 'dart:io';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../database/database_helper.dart';
 import '../models/show.dart';
 import '../models/performance.dart';
 import '../models/cast_member.dart';
+import '../models/actor.dart';
 import '../models/ticket.dart';
 import '../utils/status_colors.dart';
-import '../widgets/status_badge.dart';
+import '../utils/cover_helper.dart';
 import '../widgets/breathing_icon.dart';
 import '../widgets/bought_form_sheet.dart';
+import '../widgets/show_header_editor.dart';
+import '../widgets/show_table_editor.dart';
 
 /// 剧目管理页
-/// 展示单个剧目的详细信息、所有场次列表，支持编辑和删除
+/// 展示单个剧目的详细信息、所有场次列表，支持与添加页同一张表格进行二次编辑。
 class ShowManagementScreen extends StatefulWidget {
   final int showId;
 
@@ -27,15 +28,30 @@ class ShowManagementScreen extends StatefulWidget {
 
 class _ShowManagementScreenState extends State<ShowManagementScreen> {
   bool _isLoading = true;
+  bool _isSaving = false;
   Show? _show;
-  List<Performance> _performances = [];
-  Map<int, List<CastMember>> _castMap = {};
-  Map<int, Ticket> _ticketMap = {};
+
+  final _nameController = TextEditingController();
+  final _theaterController = TextEditingController();
+  final List<PerformanceEntry> _performances = [];
+  final List<RoleColumn> _roles = [];
+  List<String> _actorNames = [];
+  String? _coverPath;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _loadActorNames();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _theaterController.dispose();
+    for (final p in _performances) { p.dispose(); }
+    for (final r in _roles) { r.dispose(); }
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -43,42 +59,187 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
     final db = DatabaseHelper.instance;
 
     final show = await db.getShowById(widget.showId);
-    final perfMaps = await db.getPerformancesWithTicketsByShowId(widget.showId);
-    final perfs = perfMaps.map((m) => Performance.fromMap(m)).toList();
+    final data = await ShowTableData.fromShowId(widget.showId);
 
-    // 从 JOIN 结果中提取每个演出的首条 ticket
-    final ticketMap = <int, Ticket>{};
-    for (final m in perfMaps) {
-      final perfId = m['id'] as int;
-      final ticketId = m['ticket_id'] as int?;
-      if (ticketId != null) {
-        ticketMap[perfId] = Ticket(
-          id: ticketId,
-          performanceId: perfId,
-          seat: m['ticket_seat'] as String?,
-          price: m['ticket_price'] != null
-              ? (m['ticket_price'] as num).toDouble()
-              : null,
-          actualPrice: m['ticket_actual_price'] != null
-              ? (m['ticket_actual_price'] as num).toDouble()
-              : null,
-        );
-      }
+    _nameController.text = show?.name ?? '';
+    _theaterController.text = show?.theater ?? '';
+    _coverPath = show?.coverPath;
+
+    _performances.clear();
+    _roles.clear();
+    _performances.addAll(data.performances);
+    _roles.addAll(data.roles);
+
+    if (_performances.isEmpty) {
+      _performances.add(PerformanceEntry());
     }
-
-    // Batch load casts for all performances
-    final perfIds = perfs.map((p) => p.id!).toList();
-    final castMap = await db.getCastMembersByPerformanceIds(perfIds);
+    if (_roles.isEmpty) {
+      _roles.add(RoleColumn()..sync(_performances.length));
+    }
 
     if (mounted) {
       setState(() {
         _show = show;
-        _performances = perfs;
-        _castMap = castMap;
-        _ticketMap = ticketMap;
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _loadActorNames() async {
+    final actors = await DatabaseHelper.instance.getAllActors();
+    if (mounted) {
+      setState(() {
+        _actorNames = actors.map((a) => a.name).toList();
+      });
+    }
+  }
+
+  void _addPerformance() {
+    setState(() {
+      _performances.add(PerformanceEntry());
+      for (final role in _roles) {
+        role.sync(_performances.length);
+      }
+    });
+  }
+
+  void _removePerformance(int index) {
+    setState(() {
+      final removed = _performances.removeAt(index);
+      removed.dispose();
+      for (final role in _roles) {
+        role.sync(_performances.length);
+      }
+    });
+  }
+
+  void _addRole() {
+    setState(() {
+      final role = RoleColumn();
+      role.sync(_performances.length);
+      _roles.add(role);
+    });
+  }
+
+  void _removeRole(int index) {
+    setState(() {
+      _roles[index].dispose();
+      _roles.removeAt(index);
+    });
+  }
+
+  Future<void> _save() async {
+    if (_show == null) return;
+    if (_performances.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请至少保留一场演出')));
+      return;
+    }
+    for (int i = 0; i < _performances.length; i++) {
+      if (_performances[i].dateController.text.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('请填写第${i + 1}场的日期')));
+        return;
+      }
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      final db = DatabaseHelper.instance;
+      final showName = _nameController.text.trim();
+      final theater = _theaterController.text.trim().isNotEmpty
+          ? _theaterController.text.trim() : null;
+
+      // 海报改名联动
+      String? finalCoverPath = _coverPath;
+      final oldName = _show!.name;
+      if (oldName != showName && _coverPath != null && _coverPath!.isNotEmpty) {
+        finalCoverPath = await CoverHelper.renameCoverImage(_coverPath, showName);
+      }
+
+      // 更新剧目信息
+      final updatedShow = _show!.copyWith(
+        name: showName,
+        theater: theater,
+        coverPath: finalCoverPath,
+      );
+      await db.updateShow(updatedShow);
+
+      // 事务替换所有 performances
+      final perfDataList = <Map<String, dynamic>>[];
+      for (int pi = 0; pi < _performances.length; pi++) {
+        final perfEntry = _performances[pi];
+        final casts = <CastMember>[];
+        for (final role in _roles) {
+          final roleName = role.roleController.text.trim();
+          final actorName = role.actorControllers[pi].text.trim();
+          if (roleName.isNotEmpty && actorName.isNotEmpty) {
+            casts.add(CastMember(
+              performanceId: 0,
+              role: roleName,
+              actorName: actorName,
+              isFeatured: false,
+              createdAt: DateTime.now().toIso8601String(),
+            ));
+          }
+        }
+        perfDataList.add({
+          'performance': Performance(
+            showId: widget.showId,
+            date: perfEntry.dateController.text,
+            time: perfEntry.time,
+            status: perfEntry.status,
+            isInScheduleFlow: perfEntry.isInScheduleFlow,
+            createdAt: DateTime.now().toIso8601String(),
+          ),
+          'casts': casts,
+          'ticket': _buildTicketFromPerfEntry(perfEntry),
+        });
+      }
+      await db.replaceAllPerformances(widget.showId, perfDataList);
+
+      // 创建演员记录
+      for (final role in _roles) {
+        for (int pi = 0; pi < _performances.length; pi++) {
+          final actorName = role.actorControllers[pi].text.trim();
+          if (actorName.isNotEmpty) {
+            try {
+              await db.createActor(Actor(
+                name: actorName,
+                createdAt: DateTime.now().toIso8601String(),
+              ));
+            } catch (_) {}
+          }
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('剧目更新成功！')));
+        setState(() => _isSaving = false);
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('保存失败: $e')));
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  Ticket? _buildTicketFromPerfEntry(PerformanceEntry perfEntry) {
+    final price = double.tryParse(perfEntry.priceController.text.trim());
+    final actualPrice = double.tryParse(perfEntry.actualPriceController.text.trim());
+    if (price == null && actualPrice == null && perfEntry.ticket?.seat == null) {
+      return null;
+    }
+    return Ticket(
+      performanceId: 0,
+      seat: perfEntry.ticket?.seat,
+      price: price,
+      actualPrice: actualPrice,
+    );
   }
 
   Future<void> _deleteShow() async {
@@ -117,318 +278,40 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
     }
   }
 
-  Future<void> _toggleScheduleFlow() async {
-    if (_show == null) return;
-    final db = DatabaseHelper.instance;
-    final updated = _show!.copyWith(isInScheduleFlow: !_show!.isInScheduleFlow);
-    await db.updateShow(updated);
-    setState(() => _show = updated);
+  Future<void> _cycleStatus(int perfIndex) async {
+    final entry = _performances[perfIndex];
+    final currentStatus = entry.status;
+    final next = switch (currentStatus) {
+      'watched' => 'unmarked',
+      'bought' => 'watched',
+      'want_to_see' => 'bought',
+      _ => 'want_to_see',
+    };
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            updated.isInScheduleFlow
-                ? '已加入排期流，场次将显示在排期页和月历中'
-                : '已移出排期流，场次不再显示在排期页和月历中',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+    if (next == 'bought') {
+      final perfId = entry.existingPerformance?.id;
+      final ticket = perfId != null
+          ? await showBoughtFormSheet(context, performanceId: perfId)
+          : null;
+      setState(() {
+        entry.status = 'bought';
+        if (ticket != null) {
+          entry.ticket = ticket;
+        }
+      });
+      return;
     }
+
+    setState(() => entry.status = next);
   }
 
-  Future<void> _editShowInfo() async {
-    if (_show == null) return;
-    final nameController = TextEditingController(text: _show!.name);
-    final theaterController = TextEditingController(text: _show!.theater ?? '');
-
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(top: 12, bottom: 8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF4D4D4D),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const Text(
-                  '编辑剧目信息',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: TextField(
-                    controller: nameController,
-                    decoration: _inputDecoration('剧目名称'),
-                    style: const TextStyle(fontSize: 15),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: TextField(
-                    controller: theaterController,
-                    decoration: _inputDecoration('演出剧场'),
-                    style: const TextStyle(fontSize: 15),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kBrandPurple,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: const Text('保存'),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (result == true && mounted) {
-      final db = DatabaseHelper.instance;
-      final updated = _show!.copyWith(
-        name: nameController.text.trim(),
-        theater: theaterController.text.trim().isNotEmpty
-            ? theaterController.text.trim()
-            : null,
-      );
-      await db.updateShow(updated);
-      nameController.dispose();
-      theaterController.dispose();
-      if (mounted) {
-        _loadData();
-        Navigator.pop(context, true);
-      }
-    } else {
-      nameController.dispose();
-      theaterController.dispose();
-    }
-  }
-
-  Future<void> _addPerformance() async {
-    DateTime? pickedDate;
-    TimeOfDay? pickedTime;
-
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: SizedBox(
-                height: 400,
-                child: Column(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(top: 12, bottom: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF4D4D4D),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const Text(
-                      '添加场次',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 16),
-                    // Date picker
-                    ListTile(
-                      leading: const Icon(Icons.calendar_today, color: Color(0xFF8A8F98)),
-                      title: Text(
-                        pickedDate != null
-                            ? '${pickedDate!.year}-${pickedDate!.month.toString().padLeft(2, '0')}-${pickedDate!.day.toString().padLeft(2, '0')}'
-                            : '选择日期',
-                        style: TextStyle(
-                          color: pickedDate != null ? Colors.white : const Color(0xFF8A8F98),
-                        ),
-                      ),
-                      onTap: () async {
-                        final date = await showDatePicker(
-                          context: context,
-                          initialDate: DateTime.now(),
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2030),
-                          builder: (context, child) => Theme(
-                            data: Theme.of(context).copyWith(
-                              colorScheme: const ColorScheme.dark(
-                                primary: kBrandPurple,
-                                surface: Color(0xFF1E1E1E),
-                              ),
-                            ),
-                            child: child!,
-                          ),
-                        );
-                        if (date != null) {
-                          setModalState(() => pickedDate = date);
-                        }
-                      },
-                    ),
-                    // Time picker
-                    ListTile(
-                      leading: const Icon(Icons.access_time, color: Color(0xFF8A8F98)),
-                      title: Text(
-                        pickedTime != null
-                            ? '${pickedTime!.hour.toString().padLeft(2, '0')}:${pickedTime!.minute.toString().padLeft(2, '0')}'
-                            : '选择时间',
-                        style: TextStyle(
-                          color: pickedTime != null ? Colors.white : const Color(0xFF8A8F98),
-                        ),
-                      ),
-                      onTap: () async {
-                        final time = await showModalBottomSheet<TimeOfDay>(
-                          context: context,
-                          backgroundColor: const Color(0xFF1E1E1E),
-                          shape: const RoundedRectangleBorder(
-                            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                          ),
-                          builder: (context) {
-                            TimeOfDay selected = TimeOfDay.now();
-                            return SafeArea(
-                              child: SizedBox(
-                                height: 320,
-                                child: Column(
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          TextButton(
-                                            onPressed: () => Navigator.pop(context),
-                                            child: const Text('取消', style: TextStyle(color: Color(0xFF8A8F98))),
-                                          ),
-                                          TextButton(
-                                            onPressed: () => Navigator.pop(context, selected),
-                                            child: const Text('确定', style: TextStyle(color: kBrandPurple)),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const Divider(height: 1, color: Color(0xFF2A2A2A)),
-                                    Expanded(
-                                      child: CupertinoTheme(
-                                        data: const CupertinoThemeData(
-                                          brightness: Brightness.dark,
-                                          textTheme: CupertinoTextThemeData(
-                                            dateTimePickerTextStyle: TextStyle(color: Colors.white, fontSize: 18),
-                                          ),
-                                        ),
-                                        child: CupertinoDatePicker(
-                                          mode: CupertinoDatePickerMode.time,
-                                          initialDateTime: DateTime(2026, 1, 1, 19, 30),
-                                          use24hFormat: true,
-                                          onDateTimeChanged: (date) {
-                                            selected = TimeOfDay.fromDateTime(date);
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        );
-                        if (time != null) {
-                          setModalState(() => pickedTime = time);
-                        }
-                      },
-                    ),
-                    const Spacer(),
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: pickedDate != null && pickedTime != null
-                              ? () => Navigator.pop(context, true)
-                              : null,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: kBrandPurple,
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: kBrandPurple.withValues(alpha: 0.3),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          child: const Text('添加'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    if (confirmed == true && pickedDate != null && pickedTime != null && mounted) {
-      final db = DatabaseHelper.instance;
-      final dateStr = '${pickedDate!.year}-${pickedDate!.month.toString().padLeft(2, '0')}-${pickedDate!.day.toString().padLeft(2, '0')}';
-      final timeStr = '${pickedTime!.hour.toString().padLeft(2, '0')}:${pickedTime!.minute.toString().padLeft(2, '0')}';
-
-      await db.createPerformance(Performance(
-        showId: widget.showId,
-        date: dateStr,
-        time: timeStr,
-        status: 'unmarked',
-        createdAt: DateTime.now().toIso8601String(),
-      ));
-
-      if (mounted) {
-        _loadData();
-        Navigator.pop(context, true);
-      }
-    }
-  }
-
-  Future<void> _editPerformance(Performance perf) async {
-    final ticket = _ticketMap[perf.id];
-    final seatController = TextEditingController(text: ticket?.seat ?? '');
+  Future<void> _editTicket(int perfIndex) async {
+    final entry = _performances[perfIndex];
+    final seatController = TextEditingController(text: entry.ticket?.seat ?? '');
     final priceController = TextEditingController(
-        text: ticket?.price?.toString() ?? '');
+        text: entry.ticket?.price?.toString() ?? '');
+    final actualPriceController = TextEditingController(
+        text: entry.ticket?.actualPrice?.toString() ?? '');
 
     final result = await showModalBottomSheet<bool>(
       context: context,
@@ -456,7 +339,7 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
                   ),
                 ),
                 Text(
-                  '${perf.date} ${perf.time ?? ''}',
+                  '${entry.dateController.text} ${entry.time}',
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 16),
@@ -473,7 +356,17 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: TextField(
                     controller: priceController,
-                    decoration: _inputDecoration('票价'),
+                    decoration: _inputDecoration('票面价'),
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(fontSize: 15),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: TextField(
+                    controller: actualPriceController,
+                    decoration: _inputDecoration('实付价'),
                     keyboardType: TextInputType.number,
                     style: const TextStyle(fontSize: 15),
                   ),
@@ -506,33 +399,23 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
     );
 
     if (result == true && mounted) {
-      final db = DatabaseHelper.instance;
-      final seat = seatController.text.trim().isNotEmpty ? seatController.text.trim() : null;
-      final price = double.tryParse(priceController.text.trim());
-
-      if (ticket != null) {
-        await db.updateTicket(ticket.copyWith(seat: seat, price: price));
-      } else {
-        await db.createTicket(Ticket(
-          performanceId: perf.id!,
-          seat: seat,
-          price: price,
-        ));
-      }
-
-      seatController.dispose();
-      priceController.dispose();
-      if (mounted) {
-        _loadData();
-        Navigator.pop(context, true);
-      }
-    } else {
-      seatController.dispose();
-      priceController.dispose();
+      setState(() {
+        entry.ticket = Ticket(
+          performanceId: entry.existingPerformance?.id ?? 0,
+          seat: seatController.text.trim().isNotEmpty ? seatController.text.trim() : null,
+          price: double.tryParse(priceController.text.trim()),
+          actualPrice: double.tryParse(actualPriceController.text.trim()),
+        );
+      });
     }
+
+    seatController.dispose();
+    priceController.dispose();
+    actualPriceController.dispose();
   }
 
-  Future<void> _deletePerformance(Performance perf) async {
+  Future<void> _confirmDeletePerformance(int perfIndex) async {
+    final entry = _performances[perfIndex];
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -543,7 +426,7 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
         ),
         content: Text(
-          '删除 ${perf.date} ${perf.time ?? ''} 的场次？',
+          '删除 ${entry.dateController.text} ${entry.time} 的场次？',
           style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
         ),
         actions: [
@@ -560,42 +443,7 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
     );
 
     if (confirmed == true && mounted) {
-      final db = DatabaseHelper.instance;
-      await db.deletePerformance(perf.id!);
-      if (mounted) {
-        _loadData();
-        Navigator.pop(context, true);
-      }
-    }
-  }
-
-  Future<void> _cycleStatus(Performance perf) async {
-    final next = switch (perf.status) {
-      'watched' => 'unmarked',
-      'bought' => 'watched',
-      'want_to_see' => 'bought',
-      _ => 'want_to_see',
-    };
-
-    if (next == 'bought') {
-      final ticket = await showBoughtFormSheet(context, performanceId: perf.id!);
-      final db = DatabaseHelper.instance;
-      await db.updatePerformance(perf.copyWith(status: 'bought'));
-      if (ticket != null) {
-        await db.createTicket(ticket);
-      }
-      if (mounted) {
-        _loadData();
-        Navigator.pop(context, true);
-      }
-      return;
-    }
-
-    final db = DatabaseHelper.instance;
-    await db.updatePerformance(perf.copyWith(status: next));
-    if (mounted) {
-      _loadData();
-      Navigator.pop(context, true);
+      _removePerformance(perfIndex);
     }
   }
 
@@ -646,24 +494,31 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         actions: [
+          if (_isSaving)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            TextButton(
+              onPressed: _save,
+              style: TextButton.styleFrom(
+                foregroundColor: kBrandPurple,
+                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              child: const Text('保存'),
+            ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             color: const Color(0xFF1E1E1E),
             onSelected: (value) {
-              if (value == 'edit') _editShowInfo();
               if (value == 'delete') _deleteShow();
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    Icon(Icons.edit, color: Colors.white70, size: 18),
-                    SizedBox(width: 8),
-                    Text('编辑信息', style: TextStyle(color: Colors.white)),
-                  ],
-                ),
-              ),
               const PopupMenuItem(
                 value: 'delete',
                 child: Row(
@@ -689,30 +544,28 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
                   ),
                 )
               : _buildBody(),
-      floatingActionButton: !_isLoading && _show != null
-          ? FloatingActionButton.extended(
-              onPressed: _addPerformance,
-              backgroundColor: kBrandPurple,
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text('添加场次', style: TextStyle(color: Colors.white)),
-            )
-          : null,
     );
   }
 
   Widget _buildBody() {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
       children: [
-        // Top section: poster + show info
-        _buildHeaderSection(),
+        // 头部：海报 + 剧名 + 剧场（直接可编辑）
+        ShowHeaderEditor(
+          nameController: _nameController,
+          theaterController: _theaterController,
+          coverPath: _coverPath,
+          show: _show,
+          onCoverChanged: (path) => setState(() => _coverPath = path),
+        ),
         const SizedBox(height: 20),
 
-        // Schedule flow action card (core action)
+        // 排期流操作卡片
         _buildScheduleFlowCard(),
         const SizedBox(height: 28),
 
-        // Performance list section
+        // 排期场次标题
         Row(
           children: [
             Container(
@@ -729,160 +582,236 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white),
             ),
             const Spacer(),
-            Text(
-              '${_performances.length} 场',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.white.withValues(alpha: 0.5),
+            TextButton.icon(
+              onPressed: _addPerformance,
+              icon: const Icon(Icons.add, size: 16, color: kBrandPurple),
+              label: const Text('添加场次', style: TextStyle(color: kBrandPurple)),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        ..._performances.asMap().entries.map((entry) {
-          return _buildPerformanceItem(entry.value, entry.key);
-        }),
+        const SizedBox(height: 8),
+
+        // 表格
+        ShowTableEditor(
+          performances: _performances,
+          roles: _roles,
+          actorNames: _actorNames,
+          onAddPerformance: _addPerformance,
+          onRemovePerformance: _removePerformance,
+          onAddRole: _addRole,
+          onRemoveRole: _removeRole,
+          onLoadActorNames: _loadActorNames,
+          rowActionBuilder: _buildRowActions,
+        ),
+        const SizedBox(height: 16),
       ],
     );
   }
 
-  Widget _buildHeaderSection() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final posterWidth = screenWidth * 0.28;
-    final posterHeight = posterWidth * 4 / 3;
-    final color = coverColorForShow(_show!.id ?? 0);
-    final coverPath = _show!.coverPath;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Large poster
-        Container(
-          width: posterWidth,
-          height: posterHeight,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            color: color,
-            gradient: coverPath == null || coverPath.isEmpty
-                ? LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [color, color.withValues(alpha: 0.6)],
-                  )
-                : null,
-            boxShadow: [
-              BoxShadow(
-                color: color.withValues(alpha: 0.25),
-                blurRadius: 12,
-                spreadRadius: 0,
-                offset: const Offset(0, 4),
+  Future<void> _showRowActionMenu(int perfIndex, Offset globalPosition) async {
+    final entry = _performances[perfIndex];
+    final value = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPosition.dx,
+        globalPosition.dy,
+        globalPosition.dx,
+        globalPosition.dy,
+      ),
+      color: const Color(0xFF1E1E1E),
+      items: [
+        PopupMenuItem(
+          value: 'toggle_schedule_flow',
+          child: Row(
+            children: [
+              Icon(
+                entry.isInScheduleFlow ? Icons.remove_circle_outline : Icons.add_circle_outline,
+                size: 18,
+                color: entry.isInScheduleFlow ? Colors.orange : kBrandPurple,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                entry.isInScheduleFlow ? '移出排期流' : '加入排期流',
+                style: const TextStyle(color: Colors.white),
               ),
             ],
           ),
-          clipBehavior: Clip.antiAlias,
-          child: coverPath != null && coverPath.isNotEmpty
-              ? Image.file(File(coverPath), fit: BoxFit.cover)
-              : Center(
-                  child: Text(
-                    _show!.name.length >= 2
-                        ? _show!.name.substring(0, 2)
-                        : _show!.name,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      fontSize: posterWidth * 0.35,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
         ),
-        const SizedBox(width: 16),
-        // Show info
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'want_to_see',
+          child: Row(
             children: [
+              Icon(Icons.star, size: 18, color: Color(0xFF811FE2)),
+              SizedBox(width: 10),
+              Text('标记为想看', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'bought',
+          child: Row(
+            children: [
+              Icon(Icons.check_circle, size: 18, color: Color(0xFF34D399)),
+              SizedBox(width: 10),
+              Text('标记为已买', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'watched',
+          child: Row(
+            children: [
+              Icon(Icons.visibility, size: 18, color: Color(0xFFD4A853)),
+              SizedBox(width: 10),
+              Text('标记为已观演', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'unmarked',
+          child: Row(
+            children: [
+              Icon(Icons.circle_outlined, size: 18, color: Color(0xFF9CA3AF)),
+              SizedBox(width: 10),
+              Text('标记为未标记', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'ticket',
+          child: Row(
+            children: [
+              Icon(
+                Icons.confirmation_number_outlined,
+                size: 18,
+                color: entry.ticket != null ? kBrandPurple : Colors.white.withValues(alpha: 0.7),
+              ),
+              const SizedBox(width: 10),
               Text(
-                _show!.name,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+                entry.ticket != null ? '编辑票务' : '添加票务',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.9)),
               ),
-              const SizedBox(height: 8),
-              if (_show!.theater != null && _show!.theater!.isNotEmpty)
-                Row(
-                  children: [
-                    const Icon(Icons.location_on, size: 14, color: Color(0xFF8A8F98)),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        _show!.theater!,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF8A8F98),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              const SizedBox(height: 12),
-              // Edit icon
-              GestureDetector(
-                onTap: _editShowInfo,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.1),
-                    ),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.edit, size: 14, color: Color(0xFF8A8F98)),
-                      SizedBox(width: 4),
-                      Text(
-                        '编辑',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF8A8F98)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, size: 18, color: Color(0xFFF54A45)),
+              SizedBox(width: 10),
+              Text('删除场次', style: TextStyle(color: Color(0xFFF54A45))),
             ],
           ),
         ),
       ],
     );
+
+    switch (value) {
+      case 'toggle_schedule_flow':
+        setState(() => entry.isInScheduleFlow = !entry.isInScheduleFlow);
+        break;
+      case 'want_to_see':
+        if (entry.status != 'want_to_see') {
+          setState(() => entry.status = 'want_to_see');
+        }
+        break;
+      case 'bought':
+        if (entry.status != 'bought') {
+          _cycleStatus(perfIndex);
+        }
+        break;
+      case 'watched':
+        if (entry.status != 'watched') {
+          if (entry.status == 'bought') {
+            _cycleStatus(perfIndex);
+          } else {
+            setState(() => entry.status = 'watched');
+          }
+        }
+        break;
+      case 'unmarked':
+        setState(() => entry.status = 'unmarked');
+        break;
+      case 'ticket':
+        _editTicket(perfIndex);
+        break;
+      case 'delete':
+        _confirmDeletePerformance(perfIndex);
+        break;
+    }
+  }
+
+  Widget _buildRowActions(int perfIndex) {
+    final entry = _performances[perfIndex];
+    final statusColor = statusColorForLabel(entry.status);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTapDown: (details) => _showRowActionMenu(perfIndex, details.globalPosition),
+      child: Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: statusColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _statusLabel(entry.status),
+              style: TextStyle(
+                fontSize: 11,
+                color: statusColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              Icons.arrow_drop_down,
+              size: 14,
+              color: statusColor,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color statusColorForLabel(String? status) {
+    return switch (status) {
+      'bought' => const Color(0xFF34D399),
+      'want_to_see' => const Color(0xFF811FE2),
+      'watched' => const Color(0xFFD4A853),
+      _ => const Color(0xFF9CA3AF),
+    };
   }
 
   Widget _buildScheduleFlowCard() {
-    final isInFlow = _show!.isInScheduleFlow;
+    final total = _performances.length;
+    final flowCount = _performances.where((p) => p.isInScheduleFlow).length;
+    final isAllInFlow = total > 0 && flowCount == total;
+    final isAllOutFlow = flowCount == 0;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isInFlow
-            ? const Color(0xFF34D399).withValues(alpha: 0.08)
-            : kBrandPurple.withValues(alpha: 0.12),
+        color: kBrandPurple.withValues(alpha: flowCount > 0 ? 0.12 : 0.08),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isInFlow
-              ? const Color(0xFF34D399).withValues(alpha: 0.35)
-              : kBrandPurple.withValues(alpha: 0.4),
+          color: kBrandPurple.withValues(alpha: flowCount > 0 ? 0.45 : 0.3),
           width: 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: (isInFlow ? const Color(0xFF34D399) : kBrandPurple)
-                .withValues(alpha: 0.1),
+            color: kBrandPurple.withValues(alpha: 0.1),
             blurRadius: 20,
             spreadRadius: 0,
             offset: const Offset(0, 4),
@@ -894,31 +823,35 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
         children: [
           Row(
             children: [
-              Icon(
-                isInFlow ? Icons.check_circle : Icons.schedule,
-                color: isInFlow ? const Color(0xFF34D399) : kBrandPurple,
-                size: 24,
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: kBrandPurple.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  flowCount > 0 ? Icons.check_circle : Icons.schedule_outlined,
+                  color: kBrandPurple,
+                  size: 22,
+                ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isInFlow ? '已在排期流' : '未加入排期流',
+                      flowCount > 0 ? '排期中 $flowCount/$total场' : '待排期 0/$total场',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
-                        color: isInFlow
-                            ? const Color(0xFF34D399)
-                            : kBrandPurple,
+                        color: flowCount > 0 ? kBrandPurple : Colors.white.withValues(alpha: 0.8),
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      isInFlow
-                          ? '该剧目及 ${_performances.length} 个场次会显示在排期页和月历中'
-                          : '加入排期流后，该剧目及所有场次将显示在排期页和月历中',
+                      '加入排期流的场次会显示在排期页和月历中',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.white.withValues(alpha: 0.55),
@@ -931,181 +864,63 @@ class _ShowManagementScreenState extends State<ShowManagementScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _toggleScheduleFlow,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isInFlow
-                    ? const Color(0xFF34D399).withValues(alpha: 0.15)
-                    : kBrandPurple,
-                foregroundColor: isInFlow
-                    ? const Color(0xFF34D399)
-                    : Colors.white,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  side: BorderSide(
-                    color: isInFlow
-                        ? const Color(0xFF34D399).withValues(alpha: 0.4)
-                        : Colors.transparent,
-                  ),
-                ),
-              ),
-              icon: Icon(
-                isInFlow ? Icons.remove_circle_outline : Icons.add_circle_outline,
-                size: 18,
-              ),
-              label: Text(
-                isInFlow ? '移出排期流' : '加入排期流',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPerformanceItem(Performance perf, int index) {
-    final date = perf.date;
-    final time = perf.time?.substring(0, 5) ?? '';
-    final status = perf.status ?? 'unmarked';
-    final color = statusColor(status);
-    final casts = _castMap[perf.id] ?? [];
-    final ticket = _ticketMap[perf.id];
-    final seat = ticket?.seat;
-    final price = ticket?.price;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-      ),
-      child: InkWell(
-        onTap: () => _editPerformance(perf),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              Row(
-                children: [
-                  // Date + time
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        date,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                      if (time.isNotEmpty)
-                        Text(
-                          time,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.white.withValues(alpha: 0.5),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const Spacer(),
-                  // Status badge (tappable to cycle)
-                  StatusBadge(
-                    label: _statusLabel(status),
-                    color: color,
-                    onTap: () => _cycleStatus(perf),
-                  ),
-                  const SizedBox(width: 8),
-                  // Delete action
-                  GestureDetector(
-                    onTap: () => _deletePerformance(perf),
-                    child: Icon(
-                      Icons.delete_outline,
-                      size: 18,
-                      color: Colors.white.withValues(alpha: 0.3),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: isAllInFlow ? null : () {
+                    setState(() {
+                      for (final p in _performances) {
+                        p.isInScheduleFlow = true;
+                      }
+                    });
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kBrandPurple,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                ],
+                  icon: const Icon(Icons.add_circle_outline, size: 16),
+                  label: const Text(
+                    '全部加入',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
               ),
-              // Seat + price info
-              if ((seat != null && seat.isNotEmpty) || price != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Row(
-                    children: [
-                      if (seat != null && seat.isNotEmpty)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.event_seat, size: 12, color: Colors.white.withValues(alpha: 0.4)),
-                            const SizedBox(width: 4),
-                            Text(
-                              seat,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.white.withValues(alpha: 0.6),
-                              ),
-                            ),
-                          ],
-                        ),
-                      if (seat != null && seat.isNotEmpty && price != null)
-                        Container(
-                          width: 1,
-                          height: 10,
-                          margin: const EdgeInsets.symmetric(horizontal: 8),
-                          color: Colors.white.withValues(alpha: 0.1),
-                        ),
-                      if (price != null)
-                        Text(
-                          '¥${price.toStringAsFixed(0)}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.white.withValues(alpha: 0.6),
-                          ),
-                        ),
-                    ],
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: isAllOutFlow ? null : () {
+                    setState(() {
+                      for (final p in _performances) {
+                        p.isInScheduleFlow = false;
+                      }
+                    });
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E1E1E),
+                    foregroundColor: kBrandPurple,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: BorderSide(color: kBrandPurple.withValues(alpha: 0.4)),
+                    ),
+                  ),
+                  icon: const Icon(Icons.remove_circle_outline, size: 16),
+                  label: const Text(
+                    '全部移出',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                 ),
-              // Cast preview (first 3 roles)
-              if (casts.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: casts.take(3).map((cast) {
-                      return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          '${cast.role}: ${cast.actorName}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.white.withValues(alpha: 0.5),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
+              ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }

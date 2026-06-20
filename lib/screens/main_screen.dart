@@ -115,23 +115,11 @@ class _MainScreenState extends State<MainScreen> {
                           label: '日历',
                         ),
                         BottomNavigationBarItem(
-                          icon: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 200),
-                            transitionBuilder: (child, animation) {
-                              return FadeTransition(
-                                opacity: animation,
-                                child: ScaleTransition(
-                                  scale: animation,
-                                  child: child,
-                                ),
-                              );
-                            },
-                            child: ScheduleTabIcon(
-                              mode: isFocus
-                                  ? ScheduleTabIconMode.threeDay
-                                  : ScheduleTabIconMode.sevenDay,
-                              key: ValueKey<bool>(isFocus),
-                            ),
+                          icon: ScheduleTabIcon(
+                            mode: isFocus
+                                ? ScheduleTabIconMode.threeDay
+                                : ScheduleTabIconMode.sevenDay,
+                            key: ValueKey<bool>(isFocus),
                           ),
                           label: '排期',
                         ),

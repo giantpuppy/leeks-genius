@@ -3,7 +3,7 @@
 > **版本**: v1.0  
 > **日期**: 2026/06/01  
 > **状态**: 开发中（MVP 已完成，UI 优化进行中）  
-> **上次更新**: 2026/06/18 — 个人中心界面排布重构：Header 身份区强化设置入口、Hero 指标卡改为首屏一行三列、时间切片下移至指标卡下方、图表区分首屏主图与二屏网格、新增即将观演/想看清单列表与收藏占位
+> **上次更新**: 2026/06/18 — 修复排期流 3天/7天 切换红屏与月历折叠黄黑警告频闪：补齐行高除零保护、动画状态清理与 firstWhere/orElse 边界处理
 
 ---
 
@@ -11,7 +11,17 @@
 
 | 日期 | 改动内容 | 关联文件/模块 |
 |------|---------|-------------|
-| 2026/06/18 | 个人中心界面排布重构：Header 改为身份区（头像+用户名+设置入口），使用 `WarmSpotlight` 追光背景；Hero 指标卡从 2×3 改为首屏一行三列（已观演/已购买/观演花费），其余指标收入"更多数据"底部弹窗；时间切片从 Header 下移为独立分段控制器，右侧新增"本月"快捷入口；图表区分首屏主图（月度观演节奏）与二屏 2 列网格（演员排名/剧场分布/时段偏好）；新增"即将观演"与"想看清单"列表，想看清单支持左滑删除；新增"我的收藏"占位入口 | `profile_screen.dart`, `profile_stats.dart` |
+| 2026/06/20 | 场次级排期流改造：给 `Performance` 增加 `isInScheduleFlow` 字段，数据库升级到 v13；排期页/月历查询改为按场次 `is_in_schedule_flow` 过滤；管理台海报卡片支持 `待排期 0/Y场` / `排期中 X/Y场` 角标与起止月日；剧目管理页从全剧开关改为按场次加入/移出排期流，支持批量全部加入/移出；备份恢复兼容新字段；设置页重置入口同时重置 show 和 performance 的排期流状态 | `PRD.md`, `performance.dart`, `database_helper_io.dart`, `database_helper_web.dart`, `monthly_workbench_screen.dart`, `show_management_screen.dart`, `show_table_editor.dart`, `data_backup.dart`, `settings_page.dart` |
+| 2026/06/20 | 配置 Vercel 在线预览部署：新增 `vercel.json`、GitHub Actions 工作流 `deploy-web.yml`、本地部署脚本 `deploy_vercel.ps1`/`deploy_vercel.sh`；生成 `paiqi.vercel.app` 二维码并放入 PPT 结尾页；新增 10 分钟演说脚本 `launch_script_offline.md` | `vercel.json`, `.github/workflows/deploy-web.yml`, `scripts/deploy_vercel.ps1`, `scripts/deploy_vercel.sh`, `presentation/presentation.md`, `presentation/launch_script_offline.md`, `presentation/README.md` |
+| 2026/06/20 | 发现 `paiqi.vercel.app` 已被占用，改为使用 GitHub Pages 稳定地址 `https://giantpuppy.github.io/paiqi`：新增 `deploy-gh-pages.yml`、重新生成二维码、更新 PPT 与 README | `.github/workflows/deploy-gh-pages.yml`, `presentation/assets/qr_paiqi_preview.png`, `presentation/presentation.md`, `presentation/README.md` |
+| 2026/06/20 | Web 演示模式：当 Web 端无登录用户时自动创建 `demo` 账号并导入卡司排期种子数据，确保线上预览扫码直接进入数据饱满的主界面；同步更新 Web 页面标题/描述/Manifest 品牌信息 | `lib/main.dart`, `web/index.html`, `web/manifest.json` |
+| 2026/06/20 | 管理台海报卡片设计定稿：右上角合并为状态+场次角标（`待排期 0/5场` / `排期中 3/5场`）；左下角固定三行信息（剧名/剧院/起止月日 `7.3-7.5`），缺失字段留空保持占位；左上角无角标，不做长按多选；排期流中「删除」文案统一为「移出排期流」 | `PRD.md`, `monthly_workbench_screen.dart`（已合并到上方改造） |
+| 2026/06/18 | 统一添加/管理剧目表格：提取 `ShowTableEditor` 与 `ShowHeaderEditor` 公共组件；`AddShowScreen` 复用公共组件保持原有录入体验；`ShowManagementScreen` 从卡片列表改为与添加页同一张表格，支持二次编辑日期、时间、角色、演员；顶部新增「保存」按钮统一事务保存；保留排期流开关、状态循环、票编辑、删除场次/剧目 | `show_table_editor.dart`, `show_header_editor.dart`, `add_show_screen.dart`, `show_management_screen.dart` |
+| 2026/06/18 | 修复排期流 3天/7天 切换偶发红屏与月历折叠时黄黑警告频闪：在 `GanttScreen` 所有以行高做除数/乘法的位置增加 `rowHeight > 0` 防御；模式切换 postFrame 中检查 `_availableHeight` 与新旧行高；`LongPressStarButton` 状态变化时先 stop 动画再 reset；`_toggleWantToSee` 的 `firstWhere` 增加 `orElse`；`CalendarScreen` 周视图下 `rowHeight` 统一使用 `monthRowHeight` 并禁用 TableCalendar 格式动画，避免过渡帧 RenderFlex overflow | `gantt_screen.dart`, `calendar_screen.dart`, `long_press_star_button.dart` |
+| 2026/06/18 | 解耦「排期流」与「月历」显示：加入排期流仅影响排期页；月历只展示排期流中状态为「想看/已买/已看」的场次，`unmarked` 场次不再出现在月历；同步更新 `ShowManagementScreen` 排期流状态卡片文案，不再提示会进入月历 | `calendar_screen.dart`, `show_management_screen.dart` |
+| 2026/06/18 | 调整添加剧目入口位置：移除月历右上角 `+` 入口，改为在排期页管理台（工作台模式）右上角、与「时间线/管理台」切换按钮并排同大小放置；点击后进入 `AddShowScreen`，保存后仍进入 `ShowManagementScreen` 管理场次；管理台通过 `reloadSignal` 在返回后自动刷新，确保新添加剧目可见 | `gantt_screen.dart`, `monthly_workbench_screen.dart`, `calendar_screen.dart` |
+| 2026/06/18 | 修复添加剧目核心流程漏洞：新建剧目保存后进入 `ShowManagementScreen`，但此前在剧目管理页内「添加/编辑/删除场次」或「切换场次状态」后会错误调用 `Navigator.pop` 直接返回月历；现统一改为仅刷新列表，保持在管理页内操作，确保用户可继续添加场次、加入排期流 | `show_management_screen.dart` |
+| 2026/06/18 | 个人中心结构重新梳理：以「观看总场次」为顶层 Hero 指标；其下新增「观看剧目场次排序」横向条形图；演员排名与剧场分布改为 2 列网格展示；新增「金额统计」卡片展示实付/票面金额及省钱额；新增「状态统计」卡片展示已购买/已观演；时间切片控制器删除「本月」跳转入口；月度观演节奏、想看清单、即将观演、收藏占位保留；二级跳转交互预留，当前仅做展示 | `profile_screen.dart`, `profile_stats.dart`, `horizontal_bar_chart.dart` |
 | 2026/06/18 | 统一添加与管理剧目流程：新建剧目保存后直接进入 `ShowManagementScreen`，使用同一界面继续管理场次和排期流状态 | `add_show_screen.dart`, `show_management_screen.dart` |
 | 2026/06/18 | 剧目管理页排期流操作优化：将「加入/移出排期流」从头部小开关改为页面核心大卡片，保留完整场次信息的同时提升信噪比 | `show_management_screen.dart` |
 | 2026/06/18 | 月历调整：恢复「全部」筛选下展示 `unmarked` 场次；移除月历单元格上的状态文字胶囊（已买/想看/已观演），仅保留状态色时间显示 | `calendar_screen.dart`, `calendar_poster_cell.dart` |
@@ -371,17 +381,48 @@ show_templates (
 
 ### 5.5 管理台
 
-**核心概念：** 海报即入口——满屏海报铺开，视觉冲击
+**核心概念：** 海报即入口——满屏海报铺开，视觉冲击；管理台是剧目/场次全量资料库，与排期流互相独立又可双向流转。
 
 **布局：**
 - 2列网格，海报3:4比例
-- 纯海报，不显示文字标签
+- 卡片叠加信息层，文字直接压在海报上
 - Header年月选择器（◀ 2026年6月 ▶）
+
+**海报卡片信息结构：**
+
+```
+┌─────────────────────────┐
+│                         │
+│          海报            │
+│                         │
+│              排期中 3/5场 │
+│                         │
+│  女巫                    │
+│  上海大剧院              │
+│  7.23-8.2               │
+└─────────────────────────┘
+```
+
+- **右上角**：状态 + 已排期场次/总场次
+  - 待排期：`待排期 0/5场`
+  - 排期中：`排期中 3/5场`
+- **左下角**：固定三行，缺失字段留白占位，不挤占其他行
+  - 第一行：剧目名称（必显）
+  - 第二行：剧院（无则留空）
+  - 第三行：起止月日，如 `7.3-7.5`、`7.23-8.2`（无则留空）
+- **左上角**：无角标
 
 **交互：**
 - 点击海报 → 进入场次管理/编辑页
 - +直接跳转添加页
 - 左右滑动页面切换月份
+- 排期流中的「删除」操作文案统一为「移出排期流」，操作后场次回到管理台，不真正删除
+
+**数据流转：**
+1. 导入/OCR/手动添加的剧目和场次，默认全部进入管理台，状态为「待排期」
+2. 用户在管理台中挑选场次「加入排期流」，进入排期流/日历视图
+3. 在排期流中「移出排期流」的场次，回到管理台，可再次加入排期流
+4. 管理台中的「删除」才是真正从数据库移除
 
 **空状态：** 中央微弱光圈 + "这个月还没有排期"
 

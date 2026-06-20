@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'chart_theme.dart';
 import 'simple_bar_chart.dart';
@@ -118,44 +119,51 @@ class _HorizontalBarChartContentState
 
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 16,
-                    child: Text(
-                      '${index + 1}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: isTop3 ? ChartTheme.watched : ChartTheme.muted,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    flex: 2,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 72),
-                      child: Text(
-                        item.label,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: ChartTheme.value,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final availableWidth = constraints.maxWidth;
+                  final fontSize = (availableWidth * 0.075).clamp(9.0, 11.0);
+                  const rankWidth = 16.0;
+                  const valueWidth = 18.0;
+                  const gaps = 6.0 + 8.0 + 8.0;
+                  final allocatableWidth = math.max(
+                    0.0,
+                    availableWidth - rankWidth - valueWidth - gaps,
+                  );
+                  final labelWidth = (allocatableWidth * 0.35).clamp(28.0, 68.0);
+                  final barWidth = allocatableWidth - labelWidth;
+                  final progress =
+                      widget.maxValue > 0 ? item.value / widget.maxValue : 0.0;
+
+                  return Row(
+                    children: [
+                      SizedBox(
+                        width: rankWidth,
+                        child: Text(
+                          '${index + 1}',
+                          style: TextStyle(
+                            fontSize: fontSize,
+                            fontWeight: FontWeight.w700,
+                            color: isTop3 ? ChartTheme.watched : ChartTheme.muted,
+                          ),
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 3,
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final barWidth = constraints.maxWidth;
-                        final progress = widget.maxValue > 0
-                            ? item.value / widget.maxValue
-                            : 0.0;
-                        return Stack(
+                      const SizedBox(width: 6),
+                      SizedBox(
+                        width: labelWidth,
+                        child: Text(
+                          item.label,
+                          style: TextStyle(
+                            fontSize: fontSize,
+                            color: ChartTheme.value,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: barWidth,
+                        child: Stack(
                           children: [
                             Container(
                               height: 6,
@@ -180,23 +188,23 @@ class _HorizontalBarChartContentState
                               ),
                             ),
                           ],
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 18,
-                    child: Text(
-                      '${item.value}',
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: ChartTheme.muted,
+                        ),
                       ),
-                    ),
-                  ),
-                ],
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: valueWidth,
+                        child: Text(
+                          '${item.value}',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            fontSize: fontSize,
+                            color: ChartTheme.muted,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             );
           }),

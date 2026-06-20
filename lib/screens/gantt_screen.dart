@@ -18,6 +18,7 @@ import '../widgets/gantt/cast_list.dart';
 import '../widgets/gantt/gantt_decorations.dart';
 import 'unified_show_detail_screen.dart';
 import 'monthly_workbench_screen.dart';
+import 'add_show_screen.dart';
 
 enum PerformanceStatus { unmarked, wantToSee, bought }
 
@@ -84,6 +85,7 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
   bool _isWorkbenchMode = false;
   late int _workbenchYear;
   late int _workbenchMonth;
+  final ValueNotifier<int> _workbenchReloadSignal = ValueNotifier(0);
 
   TimelineMode _mode = TimelineMode.focus3Day;
   final ValueNotifier<TimelineMode> modeNotifier = ValueNotifier(TimelineMode.focus3Day);
@@ -105,6 +107,9 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
 
   // 当前屏幕中心聚焦的日期索引
   final ValueNotifier<int> _focalDayIndex = ValueNotifier(30);
+
+  // 是否已完成首次滚动定位（避免每次 _loadData 都跳回今天）
+  bool _initialScrollDone = false;
 
   double get _focusRowHeight => _availableHeight / 3;
   double get _microRowHeight => _availableHeight / 7;
@@ -128,13 +133,15 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
   void _updateMonthTitle() {
     if (!_scrollController.hasClients || _days.isEmpty) return;
     if (_availableHeight <= 0) return;
-    final idx = (_scrollController.offset / _currentRowHeight).floor().clamp(0, _days.length - 1);
+    final rowHeight = _currentRowHeight;
+    if (rowHeight <= 0) return;
+    final idx = (_scrollController.offset / rowHeight).floor().clamp(0, _days.length - 1);
     final d = _days[idx];
     _monthTitle.value = '${d.year}年${d.month}月';
 
     // 聚焦日期：屏幕中心点所在的日期
     final centerOffset = _scrollController.offset + _availableHeight / 2;
-    final focalIdx = (centerOffset / _currentRowHeight).floor().clamp(0, _days.length - 1);
+    final focalIdx = (centerOffset / rowHeight).floor().clamp(0, _days.length - 1);
     if (focalIdx != _focalDayIndex.value) {
       _focalDayIndex.value = focalIdx;
       if (mounted) setState(() {});
@@ -171,9 +178,12 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
     final firstDay = _days.first;
     final newDays = List.generate(30, (i) => DateTime(firstDay.year, firstDay.month, firstDay.day - 30 + i));
     final offsetBefore = _scrollController.offset;
+    final rowHeight = _currentRowHeight;
     setState(() => _days.insertAll(0, newDays));
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollController.jumpTo(offsetBefore + 30 * _currentRowHeight);
+      if (rowHeight > 0) {
+        _scrollController.jumpTo(offsetBefore + 30 * rowHeight);
+      }
       _updateMonthTitle();
       _isLoadingMore = false;
     });
@@ -202,7 +212,10 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
         });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollController.hasClients) {
-            _scrollController.jumpTo(30 * _currentRowHeight);
+            if (!_initialScrollDone) {
+              _scrollController.jumpTo(30 * _currentRowHeight);
+              _initialScrollDone = true;
+            }
             _updateMonthTitle();
           }
         });
@@ -223,6 +236,7 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
     _monthTitle.dispose();
     _focalDayIndex.dispose();
     modeNotifier.dispose();
+    _workbenchReloadSignal.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -300,6 +314,25 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
         centerTitle: false,
         title: _buildMonthTitle(),
         actions: [
+          // 管理台模式下显示添加剧目入口
+          if (_isWorkbenchMode)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: kBrandPurple.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: kBrandPurple.withValues(alpha: 0.35),
+                  width: 1,
+                ),
+              ),
+              child: IconButton(
+                onPressed: _addNewShow,
+                icon: const Icon(Icons.add, size: 20),
+                color: kBrandPurple,
+                tooltip: '添加剧目',
+              ),
+            ),
           // 管理台入口：纯图标，点击切换工作台视图
           Container(
             margin: const EdgeInsets.only(right: 12),
@@ -340,6 +373,7 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
       year: _workbenchYear,
       month: _workbenchMonth,
       embedded: true,
+      reloadSignal: _workbenchReloadSignal,
       onMonthChanged: (year, month) {
         setState(() {
           _workbenchYear = year;
@@ -364,6 +398,16 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
       }
     }
     setState(() => _isWorkbenchMode = !_isWorkbenchMode);
+  }
+
+  Future<void> _addNewShow() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddShowScreen()),
+    );
+    // AddShowScreen 保存后会 pushReplacement 到 ShowManagementScreen，
+    // 当前路由被替换时 await 结束；用户从管理页返回后，刷新管理台数据。
+    _workbenchReloadSignal.value++;
   }
 
   Widget _buildEmptyState() {
@@ -464,7 +508,9 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
 
     final picked = await showDatePicker(
       context: context,
-      initialDate: _days.isEmpty ? DateTime.now() : _days[(_scrollController.offset / _currentRowHeight).floor().clamp(0, _days.length - 1)],
+      initialDate: _days.isEmpty
+          ? DateTime.now()
+          : _days[(_scrollController.offset / (_currentRowHeight > 0 ? _currentRowHeight : 1.0)).floor().clamp(0, _days.length - 1)],
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
       locale: const Locale('zh', 'CN'),
@@ -496,8 +542,10 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
       if (!_scrollController.hasClients) return;
       final index = _days.indexWhere((d) => _isSameDay(d, target));
       if (index >= 0) {
+        final rowHeight = _currentRowHeight;
+        if (rowHeight <= 0) return;
         _scrollController.jumpTo(
-          (index * _currentRowHeight).clamp(
+          (index * rowHeight).clamp(
             0.0,
             _scrollController.position.maxScrollExtent,
           ),
@@ -524,7 +572,6 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
         builder: (context, constraints) {
           _availableHeight = constraints.maxHeight;
           return ListView.builder(
-            key: ValueKey<TimelineMode>(_mode),
             controller: _scrollController,
             padding: EdgeInsets.zero,
             itemCount: _days.length,
@@ -541,9 +588,11 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
 
   void _snapToNearestRow() {
     if (!_scrollController.hasClients || _isTransitioning || _justSwitched) return;
+    final rowHeight = _currentRowHeight;
+    if (rowHeight <= 0) return;
     final offset = _scrollController.offset;
-    final targetIndex = (offset / _currentRowHeight).round().clamp(0, _days.length - 1);
-    final targetOffset = targetIndex * _currentRowHeight;
+    final targetIndex = (offset / rowHeight).round().clamp(0, _days.length - 1);
+    final targetOffset = targetIndex * rowHeight;
 
     if ((offset - targetOffset).abs() > 2) {
       _isSnapping = true;
@@ -570,14 +619,24 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
 
     // 所有计算和滚动调整在布局完成后执行，确保使用最新的行高和 maxScrollExtent
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
+      if (!mounted) {
+        _isTransitioning = false;
+        return;
+      }
+      if (_scrollController.hasClients && _availableHeight > 0) {
         // 在 post frame 中重新计算行高，确保 _availableHeight 已更新
         final oldRowHeight = previousMode == TimelineMode.focus3Day ? _focusRowHeight : _microRowHeight;
         final newRowHeight = _mode == TimelineMode.focus3Day ? _focusRowHeight : _microRowHeight;
 
+        // 防御除零：布局异常时直接跳过滚动调整
+        if (oldRowHeight <= 0 || newRowHeight <= 0) {
+          _isTransitioning = false;
+          return;
+        }
+
         // 以屏幕中心日期为锚点，切换后让它仍位于屏幕中心
         final viewportCenter = previousOffset + _availableHeight / 2;
-        final focalIndex = (viewportCenter / oldRowHeight).floor().clamp(0, _days.length - 1);
+        final focalIndex = (viewportCenter / oldRowHeight).round().clamp(0, _days.length - 1);
         final targetOffset = (focalIndex * newRowHeight) - (_availableHeight - newRowHeight) / 2;
 
         _scrollController.jumpTo(
@@ -628,8 +687,9 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
     final baseFocusTintAlpha = focusDistance == 0 ? 0.12 : 0.0;
 
     // 滚动波动：仅给最焦点行加一点轻微起伏
-    final scrollProgress = _scrollController.hasClients
-        ? _scrollController.offset / _currentRowHeight
+    final rowHeight = _currentRowHeight;
+    final scrollProgress = _scrollController.hasClients && rowHeight > 0
+        ? _scrollController.offset / rowHeight
         : 0.0;
     final wave = sin((scrollProgress + index * 0.12) * pi * 2) * 0.012;
     final focusTintAlpha = (baseFocusTintAlpha + wave).clamp(0.0, 0.16);
@@ -693,8 +753,8 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
                         : (isToday ? kBrandPurple.withValues(alpha: 0.6) : const Color(0xFF6B7280)),
                   ),
                   child: Text(isFocus
-                      ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][day.weekday - 1]
-                      : '周${['一', '二', '三', '四', '五', '六', '日'][day.weekday - 1]}'),
+                      ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][(day.weekday - 1).clamp(0, 6)]
+                      : '周${['一', '二', '三', '四', '五', '六', '日'][(day.weekday - 1).clamp(0, 6)]}'),
                 ),
               ],
             ),
@@ -1030,9 +1090,14 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
 
     // 更新本地数据，避免全量刷新
     setState(() {
-      final perfMap = _performances.firstWhere((p) => p['id'] == perfId);
-      perfMap['status'] = nextStatus;
-      perfMap['effective_status'] = nextStatus;
+      final perfMap = _performances.firstWhere(
+        (p) => p['id'] == perfId,
+        orElse: () => <String, dynamic>{},
+      );
+      if (perfMap.isNotEmpty) {
+        perfMap['status'] = nextStatus;
+        perfMap['effective_status'] = nextStatus;
+      }
     });
   }
 
@@ -1605,8 +1670,7 @@ class _ShowManagementSheetState extends State<_ShowManagementSheet> {
             padding: const EdgeInsets.only(right: 8),
             child: GestureDetector(
               onTap: () => setState(() => _filter = f.$1),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
+              child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
                   color: isActive ? color.withValues(alpha: 0.15) : Colors.transparent,

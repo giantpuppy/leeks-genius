@@ -97,6 +97,14 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     }
 
+    // 同时把所有场次的排期流状态重置为 0
+    final performances = await db.getAllPerformances();
+    for (final perf in performances) {
+      if (perf.isInScheduleFlow) {
+        await db.updatePerformance(perf.copyWith(isInScheduleFlow: false));
+      }
+    }
+
     await _refresh();
 
     if (mounted) {

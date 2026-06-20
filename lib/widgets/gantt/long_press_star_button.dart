@@ -102,6 +102,9 @@ class _LongPressStarButtonState extends State<LongPressStarButton>
   void didUpdateWidget(covariant LongPressStarButton oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.status != widget.status) {
+      if (_controller.isAnimating) {
+        _controller.stop();
+      }
       _controller.reset();
     }
   }

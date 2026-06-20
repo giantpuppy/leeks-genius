@@ -10,6 +10,7 @@ class Performance {
   @Deprecated('实付价格已迁移到 tickets 表，新代码请通过 ticket.actualPrice 读取')
   double? actualPrice; // 实付价格
   String? status; // unmarked | want_to_see | bought | watched
+  bool isInScheduleFlow;
   String? createdAt;
 
   Performance({
@@ -21,6 +22,7 @@ class Performance {
     @Deprecated('使用 Ticket 模型') this.price,
     @Deprecated('使用 Ticket 模型') this.actualPrice,
     this.status,
+    this.isInScheduleFlow = false,
     this.createdAt,
   });
 
@@ -34,6 +36,7 @@ class Performance {
       'price': price,
       'actual_price': actualPrice,
       'status': status ?? 'unmarked',
+      'is_in_schedule_flow': isInScheduleFlow ? 1 : 0,
       'created_at': createdAt,
     };
   }
@@ -48,6 +51,7 @@ class Performance {
       price: map['price'] != null ? (map['price'] as num).toDouble() : null,
       actualPrice: map['actual_price'] != null ? (map['actual_price'] as num).toDouble() : null,
       status: map['status'] as String? ?? 'unmarked',
+      isInScheduleFlow: (map['is_in_schedule_flow'] as int?) == 1,
       createdAt: map['created_at'] as String?,
     );
   }
@@ -61,6 +65,7 @@ class Performance {
     @Deprecated('使用 Ticket 模型') double? price,
     @Deprecated('使用 Ticket 模型') double? actualPrice,
     String? status,
+    bool? isInScheduleFlow,
     String? createdAt,
   }) {
     return Performance(
@@ -72,6 +77,7 @@ class Performance {
       price: price ?? this.price,
       actualPrice: actualPrice ?? this.actualPrice,
       status: status ?? this.status,
+      isInScheduleFlow: isInScheduleFlow ?? this.isInScheduleFlow,
       createdAt: createdAt ?? this.createdAt,
     );
   }

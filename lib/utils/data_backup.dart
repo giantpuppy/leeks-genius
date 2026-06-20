@@ -162,6 +162,7 @@ class DataBackupCore {
             ? (p['actual_price'] as num).toDouble()
             : null,
         status: p['status'] as String? ?? 'unmarked',
+        isInScheduleFlow: (p['is_in_schedule_flow'] as int?) == 1,
         createdAt: p['created_at'] as String?,
       ));
       if (oldId != null && newPerf.id != null) {

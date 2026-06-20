@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../database/database_helper.dart';
 import '../models/show.dart';
+import '../models/performance.dart';
 import '../utils/status_colors.dart';
 import '../widgets/breathing_icon.dart';
 import 'add_show_screen.dart';
@@ -15,6 +16,7 @@ class MonthlyWorkbenchScreen extends StatefulWidget {
   final int month;
   final bool embedded;
   final void Function(int year, int month)? onMonthChanged;
+  final ValueNotifier<int>? reloadSignal;
 
   const MonthlyWorkbenchScreen({
     super.key,
@@ -22,10 +24,25 @@ class MonthlyWorkbenchScreen extends StatefulWidget {
     required this.month,
     this.embedded = false,
     this.onMonthChanged,
+    this.reloadSignal,
   });
 
   @override
   State<MonthlyWorkbenchScreen> createState() => _MonthlyWorkbenchScreenState();
+}
+
+class _ShowStats {
+  final int totalCount;
+  final int flowCount;
+  final String? startDate;
+  final String? endDate;
+
+  const _ShowStats({
+    required this.totalCount,
+    required this.flowCount,
+    this.startDate,
+    this.endDate,
+  });
 }
 
 class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
@@ -33,7 +50,7 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
   late int _year;
   late int _month;
   List<Show> _shows = [];
-  Map<int, int> _showPerformanceCounts = {};
+  Map<int, _ShowStats> _showStats = {};
   double? _dragStartX;
   double? _dragCurrentX;
 
@@ -43,6 +60,7 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
     _year = widget.year;
     _month = widget.month;
     _loadData();
+    widget.reloadSignal?.addListener(_onReloadSignal);
   }
 
   @override
@@ -53,6 +71,20 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
       _month = widget.month;
       _loadData();
     }
+    if (oldWidget.reloadSignal != widget.reloadSignal) {
+      oldWidget.reloadSignal?.removeListener(_onReloadSignal);
+      widget.reloadSignal?.addListener(_onReloadSignal);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.reloadSignal?.removeListener(_onReloadSignal);
+    super.dispose();
+  }
+
+  void _onReloadSignal() {
+    _loadData();
   }
 
   Future<void> _loadData() async {
@@ -60,25 +92,43 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
     final db = DatabaseHelper.instance;
     final perfs = await db.getPerformancesByMonth(_year, _month);
 
-    // 按 showId 去重，获取剧目列表
+    // 按 showId 去重，获取当月有演出的剧目列表
     final showIds = <int>{};
-    final counts = <int, int>{};
     for (final perf in perfs) {
-      final showId = perf['show_id'] as int;
-      showIds.add(showId);
-      counts[showId] = (counts[showId] ?? 0) + 1;
+      showIds.add(perf['show_id'] as int);
     }
 
     final shows = <Show>[];
+    final stats = <int, _ShowStats>{};
     for (final showId in showIds) {
       final show = await db.getShowById(showId);
-      if (show != null) shows.add(show);
+      if (show == null) continue;
+      shows.add(show);
+
+      // 查询该剧目所有场次（含跨月），计算统计与起止日期
+      final allPerfs = await db.getPerformancesByShowId(showId);
+      final total = allPerfs.length;
+      final flow = allPerfs.where((p) => p.isInScheduleFlow).length;
+      String? start;
+      String? end;
+      if (allPerfs.isNotEmpty) {
+        final sorted = List<Performance>.from(allPerfs)
+          ..sort((a, b) => a.date.compareTo(b.date));
+        start = sorted.first.date;
+        end = sorted.last.date;
+      }
+      stats[showId] = _ShowStats(
+        totalCount: total,
+        flowCount: flow,
+        startDate: start,
+        endDate: end,
+      );
     }
 
     if (mounted) {
       setState(() {
         _shows = shows;
-        _showPerformanceCounts = counts;
+        _showStats = stats;
         _isLoading = false;
       });
     }
@@ -303,11 +353,15 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
   Widget _buildPosterCard(Show show) {
     final coverPath = show.coverPath;
     final color = coverColorForShow(show.id ?? 0);
-    final count = _showPerformanceCounts[show.id] ?? 0;
+    final stats = _showStats[show.id];
+    final total = stats?.totalCount ?? 0;
+    final flow = stats?.flowCount ?? 0;
+    final isInFlow = flow > 0;
+    final dateRange = _formatDateRange(stats?.startDate, stats?.endDate);
 
     return GestureDetector(
       onTap: () => _navigateToShowManagement(show),
-      onLongPress: () => _showShowActionSheet(show),
+      onLongPress: () => _confirmDeleteShow(show),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
@@ -316,14 +370,12 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
             width: 1,
           ),
           boxShadow: [
-            // Bottom shadow
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.4),
               blurRadius: 8,
               spreadRadius: 0,
               offset: const Offset(0, 4),
             ),
-            // Colored glow
             BoxShadow(
               color: color.withValues(alpha: 0.2),
               blurRadius: 16,
@@ -365,81 +417,108 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
                 ),
               ),
 
-            // Performance count badge (top-right)
-            if (count > 1)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      width: 0.5,
-                    ),
+            // Status + count badge (top-right)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isInFlow
+                        ? kBrandPurple.withValues(alpha: 0.5)
+                        : Colors.white.withValues(alpha: 0.2),
+                    width: 0.5,
                   ),
-                  child: Text(
-                    '$count场',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
+                ),
+                child: Text(
+                  isInFlow ? '排期中 $flow/$total场' : '待排期 0/$total场',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isInFlow ? kBrandPurple : Colors.white.withValues(alpha: 0.8),
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
+            ),
 
-            // Schedule flow indicator (top-left)
-            if (show.isInScheduleFlow)
-              Positioned(
-                top: 8,
-                left: 8,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: kBrandPurple.withValues(alpha: 0.4),
-                      width: 0.5,
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.check_circle,
-                    size: 14,
-                    color: kBrandPurple,
-                  ),
-                ),
-              ),
-
-            // Show name at bottom with gradient overlay
+            // Bottom info overlay
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
               child: Container(
-                padding: const EdgeInsets.fromLTRB(12, 24, 12, 12),
+                padding: const EdgeInsets.fromLTRB(10, 48, 10, 10),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      Colors.transparent,
-                      Colors.black.withValues(alpha: 0.7),
+                      Colors.black.withValues(alpha: 0.0),
+                      Colors.black.withValues(alpha: 0.55),
+                      Colors.black.withValues(alpha: 0.82),
                     ],
+                    stops: const [0.0, 0.45, 1.0],
                   ),
                 ),
-                child: Text(
-                  show.name,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      show.name,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withValues(alpha: 0.9),
+                            offset: const Offset(0, 1),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      show.theater ?? '',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.white.withValues(alpha: 0.78),
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withValues(alpha: 0.9),
+                            offset: const Offset(0, 1),
+                            blurRadius: 3,
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      dateRange,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.white.withValues(alpha: 0.78),
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withValues(alpha: 0.9),
+                            offset: const Offset(0, 1),
+                            blurRadius: 3,
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -449,91 +528,22 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
     );
   }
 
-  Future<void> _showShowActionSheet(Show show) async {
-    final isInFlow = show.isInScheduleFlow;
+  String _formatDateRange(String? start, String? end) {
+    if (start == null || start.isEmpty) return '';
+    final startParts = start.split('-');
+    final startMonth = int.tryParse(startParts[1]) ?? 0;
+    final startDay = int.tryParse(startParts[2]) ?? 0;
+    final startStr = '$startMonth.$startDay';
 
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF4D4D4D),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ListTile(
-                leading: Icon(
-                  isInFlow ? Icons.remove_circle_outline : Icons.playlist_add_check,
-                  color: isInFlow ? Colors.orange : kBrandPurple,
-                ),
-                title: Text(isInFlow ? '移出排期流' : '导入排期流'),
-                subtitle: Text(
-                  isInFlow
-                      ? '该剧目将不再出现在排期流和月历中'
-                      : '将该剧目加入排期流，可在排期页查看',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-                ),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await _toggleShowInScheduleFlow(show);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.edit, color: Colors.white70),
-                title: const Text('编辑剧目'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _navigateToShowManagement(show);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: Color(0xFFF54A45)),
-                title: const Text(
-                  '删除剧目',
-                  style: TextStyle(color: Color(0xFFF54A45)),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _confirmDeleteShow(show);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+    if (end == null || end.isEmpty || end == start) return startStr;
+    final endParts = end.split('-');
+    final endMonth = int.tryParse(endParts[1]) ?? 0;
+    final endDay = int.tryParse(endParts[2]) ?? 0;
 
-  Future<void> _toggleShowInScheduleFlow(Show show) async {
-    final db = DatabaseHelper.instance;
-    final updated = show.copyWith(isInScheduleFlow: !show.isInScheduleFlow);
-    await db.updateShow(updated);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            updated.isInScheduleFlow
-                ? '「${show.name}」已导入排期流'
-                : '「${show.name}」已移出排期流',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      _loadData();
+    if (startMonth == endMonth) {
+      return '$startMonth.$startDay-$endDay';
     }
+    return '$startMonth.$startDay-$endMonth.$endDay';
   }
 
   Future<void> _confirmDeleteShow(Show show) async {
