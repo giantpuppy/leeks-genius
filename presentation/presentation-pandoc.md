@@ -4,7 +4,7 @@
 
 专为中国音乐剧观众打造的排期管理 App
 
-Paiqi Release
+LeeksGenius
 
 ---
 
@@ -160,4 +160,4 @@ Paiqi Release
 
 愿 vibe coding 赐福我的戏梦人生
 
-Paiqi · 排期天菜
+LeeksGenius · 排期天菜

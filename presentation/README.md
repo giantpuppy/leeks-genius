@@ -44,7 +44,7 @@ bash scripts/deploy_vercel.sh
 ## 品牌规范
 
 - **中文名：** 排期天菜
-- **英文名：** Paiqi
+- **英文名：** LeeksGenius
 - **Slogan：** 排期的事，交给排期天菜。
 - **视觉风格：** 像素风 + 星之果实紫绿
 - **配色：**

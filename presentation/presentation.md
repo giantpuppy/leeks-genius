@@ -219,7 +219,7 @@ style: |
 
 <p class="slogan">专为中国音乐剧观众打造的排期管理 App</p>
 
-<p style="margin-top: 60px; color: #666;">Paiqi Release</p>
+<p style="margin-top: 60px; color: #666;">LeeksGenius</p>
 
 <!-- 封面视觉：Logo 大图居中，黑底紫绿渐变光效 -->
 
@@ -460,7 +460,7 @@ style: |
 
 <p style="margin-top: 80px; font-size: 1.5em; color: #34D399;">看剧的快乐不该被排期吃掉。</p>
 
-<p style="margin-top: 40px; color: #666;">Paiqi · 排期天菜</p>
+<p style="margin-top: 40px; color: #666;">LeeksGenius · 排期天菜</p>
 
 <div style="margin-top: 30px;">
   <img src="assets/qr_paiqi_preview.png" width="160" height="160" alt="在线预览二维码" style="border-radius: 12px;" />
