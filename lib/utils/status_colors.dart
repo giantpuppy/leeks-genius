@@ -30,12 +30,14 @@ Color coverColorForShow(int showId) {
 ///
 /// - want_to_see: 紫色 (#811FE2)
 /// - watched: 金色 (#D4A853)
-/// - 其他（bought / unmarked）: 绿色 (#34D399)
+/// - bought: 绿色 (#34D399)
+/// - unmarked: 白色
 Color statusColor(String status) {
   return switch (status) {
     'want_to_see' => const Color(0xFF811FE2),
     'watched' => const Color(0xFFD4A853),
-    _ => const Color(0xFF34D399),
+    'bought' => const Color(0xFF34D399),
+    _ => Colors.white,
   };
 }
 

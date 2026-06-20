@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../database/database_helper.dart';
@@ -1155,11 +1156,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             clipBehavior: Clip.antiAlias,
             child: show != null
-                ? PosterFallback(
-                    showId: show.id ?? 0,
-                    showName: show.name,
-                    fontSize: 18,
-                  )
+                ? (show.coverPath != null && show.coverPath!.isNotEmpty
+                    ? Image.file(
+                        File(show.coverPath!),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => PosterFallback(
+                          showId: show.id ?? 0,
+                          showName: show.name,
+                          fontSize: 18,
+                        ),
+                      )
+                    : PosterFallback(
+                        showId: show.id ?? 0,
+                        showName: show.name,
+                        fontSize: 18,
+                      ))
                 : const SizedBox.shrink(),
           ),
           const SizedBox(width: 12),

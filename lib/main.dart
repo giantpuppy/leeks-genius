@@ -36,13 +36,12 @@ void main() async {
   if (effectiveUser != null) {
     await DatabaseHelper.switchUser(effectiveUser);
     final isDemoUser = effectiveUser == 'demo';
-    // Demo 模式：每次启动强制清空旧数据并重新导入，确保发布会演示数据完整最新
+    // Demo 模式：如果数据被清空则重新导入，否则跳过
     if (isDemoUser) {
-      await ScheduleImportService.resetFlag(effectiveUser);
-      final db = DatabaseHelper.instance;
-      await db.deleteAllCastMembers();
-      await db.deleteAllPerformances();
-      await db.deleteAllShows();
+      final existingShows = await DatabaseHelper.instance.getAllShows();
+      if (existingShows.isEmpty) {
+        await ScheduleImportService.resetFlag(effectiveUser);
+      }
     }
     final importResult = await ScheduleImportService.importBundleIfNeeded(
       effectiveUser,
@@ -88,14 +87,21 @@ Future<void> _importCovers() async {
       File? bestMatch;
 
       for (final file in files) {
-        final baseName = p.basename(file.path);
-        if (baseName.startsWith(safeName)) {
+        final baseName = p.basename(file.path).toLowerCase();
+        final nameWithoutExt = p.basenameWithoutExtension(file.path).toLowerCase();
+        final showNameLower = show.name.toLowerCase();
+        final safeNameLower = safeName.toLowerCase();
+
+        // 精确前缀匹配
+        if (baseName.startsWith(safeNameLower) ||
+            nameWithoutExt.startsWith(showNameLower) ||
+            nameWithoutExt.startsWith(safeNameLower)) {
           bestMatch = file;
           break;
         }
-        final nameWithoutExt = p.basenameWithoutExtension(file.path);
-        if (nameWithoutExt.startsWith(show.name) ||
-            nameWithoutExt.startsWith(safeName)) {
+        // 模糊包含匹配：文件名包含剧名，或剧名包含文件名（≥2字符）
+        if ((nameWithoutExt.contains(showNameLower) && showNameLower.length >= 2) ||
+            (showNameLower.contains(nameWithoutExt) && nameWithoutExt.length >= 2)) {
           bestMatch = file;
           break;
         }

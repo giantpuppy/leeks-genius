@@ -509,9 +509,10 @@ class _UnifiedShowDetailScreenState extends State<UnifiedShowDetailScreen> {
               const SizedBox(height: 12),
               Text(
                 _show!.theater ?? '未知剧场',
-                style: TextStyle(
-                  fontSize: 15,
-                  color: Colors.white.withValues(alpha: 0.75),
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white,
                 ),
               ),
               if (seatText.isNotEmpty) ...[
@@ -529,6 +530,13 @@ class _UnifiedShowDetailScreenState extends State<UnifiedShowDetailScreen> {
         ),
       ],
     );
+  }
+
+  /// 去除角色名中的书名号/方括号等符号
+  String _stripBrackets(String role) {
+    return role
+        .replaceAll(RegExp(r'[《》「」『』【】\[\]（）()]+'), '')
+        .trim();
   }
 
   String _formatSeatDisplay(String seat) {
@@ -571,23 +579,30 @@ class _UnifiedShowDetailScreenState extends State<UnifiedShowDetailScreen> {
                 ),
                 child: Row(
                   children: [
-                    Expanded(
-                      child: Text(
-                        cast.role.isEmpty ? '-' : cast.role,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.white.withValues(alpha: 0.5),
+                    if (cast.role.isNotEmpty) ...[
+                      Expanded(
+                        child: Text(
+                          _stripBrackets(cast.role),
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.white.withValues(alpha: 0.7),
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                     Expanded(
+                      flex: cast.role.isNotEmpty ? 1 : 2,
                       child: Row(
                         children: [
-                          Text(
-                            cast.actorName.isEmpty ? '-' : cast.actorName,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white.withValues(alpha: 0.9),
+                          Flexible(
+                            child: Text(
+                              cast.actorName.isEmpty ? '-' : cast.actorName,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           if (cast.isFeatured == true) ...[

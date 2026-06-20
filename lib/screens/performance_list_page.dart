@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/performance.dart';
 import '../models/show.dart';
@@ -132,11 +133,21 @@ class PerformanceListPage extends StatelessWidget {
             ),
             clipBehavior: Clip.antiAlias,
             child: show != null
-                ? PosterFallback(
-                    showId: show.id ?? 0,
-                    showName: show.name,
-                    fontSize: 18,
-                  )
+                ? (show.coverPath != null && show.coverPath!.isNotEmpty
+                    ? Image.file(
+                        File(show.coverPath!),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => PosterFallback(
+                          showId: show.id ?? 0,
+                          showName: show.name,
+                          fontSize: 18,
+                        ),
+                      )
+                    : PosterFallback(
+                        showId: show.id ?? 0,
+                        showName: show.name,
+                        fontSize: 18,
+                      ))
                 : const SizedBox.shrink(),
           ),
           const SizedBox(width: 14),

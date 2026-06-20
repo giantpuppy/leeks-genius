@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import '../database/database_helper.dart';
 import '../models/show.dart';
 import '../models/performance.dart';
+import '../utils/cover_helper.dart';
 import '../utils/status_colors.dart';
 import '../widgets/breathing_icon.dart';
 import 'show_management_screen.dart';
@@ -212,6 +214,18 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
     }
   }
 
+  Future<void> _pickCover(Show show) async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null) return;
+
+    final bytes = await picked.readAsBytes();
+    final path = await CoverHelper.saveCoverImage(show.name, bytes);
+    final db = DatabaseHelper.instance;
+    await db.updateShow(show.copyWith(coverPath: path));
+    _loadData();
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -381,23 +395,37 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
                 fit: BoxFit.cover,
               )
             else
-              Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [color, color.withValues(alpha: 0.6)],
+              GestureDetector(
+                onTap: () => _pickCover(show),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [color, color.withValues(alpha: 0.6)],
+                    ),
                   ),
-                ),
-                child: Center(
-                  child: Text(
-                    show.name.length >= 2
-                        ? show.name.substring(0, 2)
-                        : show.name,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          show.name.length >= 2
+                              ? show.name.substring(0, 2)
+                              : show.name,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.18),
+                            fontSize: 48,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Icon(
+                          Icons.add_photo_alternate_outlined,
+                          color: Colors.white.withValues(alpha: 0.35),
+                          size: 28,
+                        ),
+                      ],
                     ),
                   ),
                 ),

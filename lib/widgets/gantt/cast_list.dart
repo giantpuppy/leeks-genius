@@ -34,57 +34,64 @@ class FeaturedCastList extends StatelessWidget {
     if (display.isEmpty) return const SizedBox.shrink();
 
     final roleStyle = TextStyle(
-      color: Colors.white.withValues(alpha: 0.55),
-      fontSize: width * 0.065,
+      color: Colors.white.withValues(alpha: 0.75),
+      fontSize: width * 0.08,
       fontWeight: FontWeight.w400,
       shadows: const [
         Shadow(
           color: Colors.black,
-          blurRadius: 3,
+          blurRadius: 4,
         ),
       ],
     );
 
     final actorStyle = TextStyle(
       color: Colors.white,
-      fontSize: width * 0.065,
+      fontSize: width * 0.08,
       fontWeight: FontWeight.w600,
       shadows: const [
         Shadow(
           color: Colors.black,
-          blurRadius: 3,
+          blurRadius: 4,
         ),
       ],
     );
 
     final dividerStyle = TextStyle(
-      color: Colors.white.withValues(alpha: 0.35),
-      fontSize: width * 0.065,
+      color: Colors.white.withValues(alpha: 0.45),
+      fontSize: width * 0.08,
     );
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: display.map((c) {
+        final cleanRole = c.role.replaceAll(RegExp(r'[《》「」『』【】\[\]（）()]+'), '').trim();
         return Padding(
           padding: EdgeInsets.only(bottom: height * 0.012),
           child: Row(
             mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                c.role,
-                style: roleStyle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              Flexible(
+                child: Text(
+                  cleanRole.isEmpty ? '-' : cleanRole,
+                  style: roleStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                ),
               ),
               const SizedBox(width: 6),
               Text('|', style: dividerStyle),
               const SizedBox(width: 6),
-              Text(
-                c.actorName,
-                style: actorStyle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              Flexible(
+                child: Text(
+                  c.actorName.isEmpty ? '-' : c.actorName,
+                  style: actorStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),

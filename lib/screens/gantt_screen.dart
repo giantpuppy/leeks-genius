@@ -899,8 +899,8 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
               )
             else
               _buildGradientFallback(color, showId),
-            // Layer 2: 全屏蒙版（降低让海报更透）
-            Container(color: Colors.black.withValues(alpha: 0.18)),
+            // Layer 2: 全屏蒙版
+            Container(color: Colors.black.withValues(alpha: 0.25)),
             // Layer 2.5: 顶部加重渐变，确保文字可读
             Container(
               decoration: BoxDecoration(
@@ -909,8 +909,8 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
                   end: Alignment.bottomCenter,
                   stops: const [0.0, 0.55, 1.0],
                   colors: [
-                    Colors.black.withValues(alpha: 0.45),
-                    Colors.black.withValues(alpha: 0.12),
+                    Colors.black.withValues(alpha: 0.55),
+                    Colors.black.withValues(alpha: 0.22),
                     Colors.transparent,
                   ],
                 ),
@@ -959,7 +959,7 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
                         showName,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.90),
-                          fontSize: cardWidth * 0.055,
+                          fontSize: cardWidth * 0.07,
                           fontWeight: FontWeight.w600,
                           shadows: [
                             Shadow(
@@ -1129,9 +1129,18 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
     final color = coverColorForShow(showId);
     final status = perf['effective_status'] as String? ??
         (perf['status'] as String? ?? 'unmarked');
+    final perfId = perf['id'] as int;
+    final storedStatus = perf['status'] as String? ?? 'unmarked';
+    final effectiveStatus = perf['effective_status'] as String? ?? storedStatus;
+    final allCasts = _castMap[perfId] ?? [];
     final cardWidth = cardHeight * 0.75; // 3:4 比例
     final cardSpacing = cardWidth * 0.04;
     final cardBorderRadius = cardHeight * 0.05;
+    final barHeight = cardHeight * 0.18;
+    final sColor = statusColor(status);
+
+    // 取前 5 位演员名（去除特殊符号）
+    final actorNames = allCasts.take(5).map((c) => c.actorName.replaceAll(RegExp(r'[《》「」『』【】\[\]（）()]+'), '').trim()).toList();
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -1147,19 +1156,16 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
             width: 1,
           ),
           boxShadow: [
-            // 彩色光晕
             BoxShadow(
               color: color.withValues(alpha: 0.25),
               blurRadius: 14,
               spreadRadius: 1,
             ),
-            // 边缘溢光
             BoxShadow(
               color: color.withValues(alpha: 0.10),
               blurRadius: 28,
               spreadRadius: 3,
             ),
-            // 底部投影
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.35),
               blurRadius: 8,
@@ -1170,44 +1176,95 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(cardBorderRadius),
-          child: Stack(
-            fit: StackFit.expand,
+          child: Column(
             children: [
-              coverPath != null && coverPath.isNotEmpty
-                  ? Image.file(
-                      File(coverPath),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _buildPosterFallback(color, showId, showName),
-                    )
-                  : _buildPosterFallback(color, showId, showName),
-              // 黑色蒙版
-              Container(color: Colors.black.withValues(alpha: 0.18)),
-              // 时间与状态点
-              Container(
-                alignment: Alignment.center,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+              // ── 上部：海报 + 演员名 ──
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    StampTime(
-                      time: time,
-                      width: cardWidth,
-                      isToday: isToday,
-                    ),
-                    SizedBox(height: cardHeight * 0.04),
-                    Container(
-                      width: 4,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: statusColor(status),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: statusColor(status).withValues(alpha: 0.5),
-                            blurRadius: 4,
-                            spreadRadius: 0,
-                          ),
-                        ],
+                    // 海报底图
+                    coverPath != null && coverPath.isNotEmpty
+                        ? Image.file(
+                            File(coverPath),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                _buildPosterFallback(color, showId, showName),
+                          )
+                        : _buildPosterFallback(color, showId, showName),
+                    // 蒙版
+                    Container(color: Colors.black.withValues(alpha: 0.30)),
+                    // 演员名（垂直居中）
+                    if (actorNames.isNotEmpty)
+                      Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: actorNames
+                              .map((name) => Padding(
+                                    padding: EdgeInsets.only(
+                                        bottom: cardHeight * 0.008),
+                                    child: Text(
+                                      name,
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: cardWidth * 0.13,
+                                        fontWeight: FontWeight.w600,
+                                        shadows: const [
+                                          Shadow(
+                                              color: Colors.black,
+                                              blurRadius: 4),
+                                        ],
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ))
+                              .toList(),
+                        ),
                       ),
+                  ],
+                ),
+              ),
+              // ── 底部：状态色时间条 + 星标 ──
+              Container(
+                height: barHeight,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A1A).withValues(alpha: 0.90),
+                  boxShadow: [
+                    BoxShadow(
+                      color: sColor.withValues(alpha: 0.30),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                    ),
+                  ],
+                ),
+                padding: EdgeInsets.symmetric(horizontal: cardWidth * 0.06),
+                child: Row(
+                  children: [
+                    // 时间（状态色）
+                    if (time.isNotEmpty)
+                      Text(
+                        time,
+                        style: TextStyle(
+                          color: sColor,
+                          fontSize: cardWidth * 0.10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                          shadows: [
+                            Shadow(
+                              color: sColor.withValues(alpha: 0.6),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                      ),
+                    const Spacer(),
+                    // 星标
+                    LongPressStarButton(
+                      status: effectiveStatus,
+                      size: cardWidth * 0.12,
+                      onStatusChanged: () =>
+                          _toggleWantToSee(perfId, storedStatus),
                     ),
                   ],
                 ),
