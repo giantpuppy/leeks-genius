@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
 
     <application
-        android:label="排期助手"
+        android:label="排期天菜"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
