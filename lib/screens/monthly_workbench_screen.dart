@@ -325,7 +325,7 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
           ),
           const SizedBox(height: 20),
           Text(
-            '这个月还没有排期',
+            '本月暂无剧目场次',
             style: TextStyle(
               fontSize: 16,
               color: Colors.white.withValues(alpha: 0.5),
@@ -372,7 +372,7 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
 
     return GestureDetector(
       onTap: () => _navigateToShowManagement(show),
-      onLongPress: () => _confirmDeleteShow(show),
+      onLongPress: () => _showShowActions(show),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
@@ -555,6 +555,101 @@ class _MonthlyWorkbenchScreenState extends State<MonthlyWorkbenchScreen> {
       return '$startMonth.$startDay-$endDay';
     }
     return '$startMonth.$startDay-$endMonth.$endDay';
+  }
+
+  Future<void> _showShowActions(Show show) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 8),
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3A3A3A),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            _buildActionTile(
+              icon: Icons.edit_outlined,
+              label: '剧场编辑',
+              value: 'edit_theater',
+            ),
+            _buildActionTile(
+              icon: Icons.calendar_today_outlined,
+              label: '排期编辑',
+              value: 'edit_schedule',
+            ),
+            _buildActionTile(
+              icon: Icons.edit_note,
+              label: '剧目编辑',
+              value: 'edit_show',
+            ),
+            _buildActionTile(
+              icon: Icons.delete_outline,
+              label: '剧目删除',
+              value: 'delete_show',
+              isDestructive: true,
+            ),
+            _buildActionTile(
+              icon: Icons.delete_forever_outlined,
+              label: '删除剧场',
+              value: 'delete_theater',
+              isDestructive: true,
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case 'edit_theater':
+      case 'edit_schedule':
+      case 'edit_show':
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ShowManagementScreen(showId: show.id!),
+          ),
+        );
+        if (result == true) _loadData();
+        break;
+      case 'delete_show':
+      case 'delete_theater':
+        _confirmDeleteShow(show);
+        break;
+    }
+  }
+
+  Widget _buildActionTile({
+    required IconData icon,
+    required String label,
+    required String value,
+    bool isDestructive = false,
+  }) {
+    final color = isDestructive ? const Color(0xFFF54A45) : Colors.white;
+    return ListTile(
+      leading: Icon(icon, color: color, size: 22),
+      title: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 15),
+      ),
+      onTap: () => Navigator.pop(context, value),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      visualDensity: const VisualDensity(vertical: -1),
+    );
   }
 
   Future<void> _confirmDeleteShow(Show show) async {
