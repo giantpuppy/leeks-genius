@@ -61,6 +61,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Map<DateTime, List<Map<String, dynamic>>> _events = {};
   bool _isLoading = false;
   bool _isCalendarExpanded = true;
+  bool _isFilterExpanded = false;
 
   final DateFormat _dateFormat = DateFormat('yyyy-MM-dd');
   final DateFormat _displayFormat = DateFormat('yyyy年M月');
@@ -419,7 +420,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
               ),
             ),
             actions: [
-              _buildFilterBar(),
+              if (_isFilterExpanded) ...[
+                _buildFilterBar(),
+                const SizedBox(width: 4),
+              ] else ...[
+                _buildFilterToggle(),
+              ],
               const SizedBox(width: 8),
             ],
             foregroundColor: Colors.white,
@@ -985,6 +991,40 @@ class _CalendarScreenState extends State<CalendarScreen> {
     }
   }
 
+  Widget _buildFilterToggle() {
+    final filterColor =
+        _filter == CalendarFilter.all ? null : _statusColorForFilter(_filter);
+    return GestureDetector(
+      onTap: () => setState(() => _isFilterExpanded = true),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A1A),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: filterColor?.withValues(alpha: 0.3) ?? const Color(0xFF2A2A2A),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (filterColor != null) ...[
+              Container(
+                width: 5, height: 5,
+                decoration: BoxDecoration(
+                  color: filterColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+            const Icon(Icons.tune, size: 16, color: Color(0xFF8A8F98)),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFilterBar() {
     final filters = [
       (CalendarFilter.all, '全部', null),
@@ -1001,57 +1041,67 @@ class _CalendarScreenState extends State<CalendarScreen> {
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: filters.map((f) {
-          final isActive = _filter == f.$1;
-          final color = f.$3 ?? const Color(0xFF6B5BCD);
-          return GestureDetector(
-            onTap: () {
-              if (_filter != f.$1) {
-                setState(() => _filter = f.$1);
-                _loadEventsForMonth(_focusedDay);
-                _loadPerformancesForDate(_selectedDay ?? _focusedDay);
-              }
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: isActive ? const Color(0xFF2A2A2A) : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: isActive ? [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.15),
-                    blurRadius: 8,
-                    spreadRadius: 0,
-                  ),
-                ] : null,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (f.$3 != null) ...[
-                    Container(
-                      width: 5, height: 5,
-                      decoration: BoxDecoration(
-                        color: isActive ? color : color.withValues(alpha: 0.4),
-                        shape: BoxShape.circle,
+        children: [
+          ...filters.map((f) {
+            final isActive = _filter == f.$1;
+            final color = f.$3 ?? const Color(0xFF6B5BCD);
+            return GestureDetector(
+              onTap: () {
+                if (_filter != f.$1) {
+                  setState(() => _filter = f.$1);
+                  _loadEventsForMonth(_focusedDay);
+                  _loadPerformancesForDate(_selectedDay ?? _focusedDay);
+                }
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isActive ? const Color(0xFF2A2A2A) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: isActive ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.15),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                    ),
+                  ] : null,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (f.$3 != null) ...[
+                      Container(
+                        width: 5, height: 5,
+                        decoration: BoxDecoration(
+                          color: isActive ? color : color.withValues(alpha: 0.4),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Text(
+                      f.$2,
+                      style: TextStyle(
+                        color: isActive ? Colors.white : const Color(0xFF6B6B6B),
+                        fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                        fontSize: 12,
                       ),
                     ),
-                    const SizedBox(width: 4),
                   ],
-                  Text(
-                    f.$2,
-                    style: TextStyle(
-                      color: isActive ? Colors.white : const Color(0xFF6B6B6B),
-                      fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
+                ),
               ),
+            );
+          }),
+          const SizedBox(width: 2),
+          GestureDetector(
+            onTap: () => setState(() => _isFilterExpanded = false),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Icon(Icons.close, size: 14, color: Color(0xFF6B6B6B)),
             ),
-          );
-        }).toList(),
+          ),
+        ],
       ),
     );
   }
@@ -1106,15 +1156,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
             Text(
               '本日暂无场次',
               style: TextStyle(color: Color(0xFF8A8F98)),
-            ),
-            SizedBox(height: 8),
-            Text(
-              '在排期流中添加或标记场次后，\n场次会显示在这里',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: Color(0xFF7C7C7C),
-              ),
             ),
           ],
         ),
