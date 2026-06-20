@@ -1045,11 +1045,11 @@ class GanttScreenState extends State<GanttScreen> with TickerProviderStateMixin 
           child: card,
         ),
         Positioned(
-          top: cardHeight * 0.03,
-          right: cardWidth * 0.04,
+          top: cardHeight * 0.035,
+          right: cardWidth * 0.035,
           child: LongPressStarButton(
             status: effectiveStatus,
-            size: cardWidth * 0.09,
+            size: cardWidth * 0.08,
             onStatusChanged: () => _toggleWantToSee(perfId, storedStatus),
           ),
         ),

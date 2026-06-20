@@ -33,67 +33,64 @@ class FeaturedCastList extends StatelessWidget {
     final display = _displayCasts;
     if (display.isEmpty) return const SizedBox.shrink();
 
+    // 用一个较大的基准字号，FittedBox 会自动缩放到可用宽度
+    final baseFontSize = width * 0.10;
+
     final roleStyle = TextStyle(
       color: Colors.white.withValues(alpha: 0.75),
-      fontSize: width * 0.08,
+      fontSize: baseFontSize,
       fontWeight: FontWeight.w400,
       shadows: const [
-        Shadow(
-          color: Colors.black,
-          blurRadius: 4,
-        ),
+        Shadow(color: Colors.black, blurRadius: 4),
       ],
     );
 
     final actorStyle = TextStyle(
       color: Colors.white,
-      fontSize: width * 0.08,
+      fontSize: baseFontSize,
       fontWeight: FontWeight.w600,
       shadows: const [
-        Shadow(
-          color: Colors.black,
-          blurRadius: 4,
-        ),
+        Shadow(color: Colors.black, blurRadius: 4),
       ],
     );
 
     final dividerStyle = TextStyle(
       color: Colors.white.withValues(alpha: 0.45),
-      fontSize: width * 0.08,
+      fontSize: baseFontSize,
     );
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: display.map((c) {
-        final cleanRole = c.role.replaceAll(RegExp(r'[《》「」『』【】\[\]（）()]+'), '').trim();
+        final cleanRole = c.role
+            .replaceAll(RegExp(r'[《》「」『』【】\[\]（）()]+'), '')
+            .trim();
         return Padding(
-          padding: EdgeInsets.only(bottom: height * 0.012),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Flexible(
-                child: Text(
-                  cleanRole.isEmpty ? '-' : cleanRole,
-                  style: roleStyle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                ),
+          padding: EdgeInsets.only(bottom: height * 0.01),
+          child: SizedBox(
+            width: width * 0.80,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.center,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    cleanRole.isEmpty ? '-' : cleanRole,
+                    style: roleStyle,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text('|', style: dividerStyle),
+                  ),
+                  Text(
+                    c.actorName.isEmpty ? '-' : c.actorName,
+                    style: actorStyle,
+                  ),
+                ],
               ),
-              const SizedBox(width: 6),
-              Text('|', style: dividerStyle),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  c.actorName.isEmpty ? '-' : c.actorName,
-                  style: actorStyle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+            ),
           ),
         );
       }).toList(),
