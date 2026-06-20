@@ -1,8 +1,12 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import 'database/database_helper.dart';
+import 'utils/cover_helper.dart';
 import 'services/schedule_import_service.dart';
 import 'services/user_service.dart';
 import 'utils/seed_data.dart';
@@ -47,6 +51,8 @@ void main() async {
     if (kDebugMode && importResult != null) {
       debugPrint('ScheduleImportService: $importResult');
     }
+    // 导入海报：匹配 covers 目录中的图片到数据库剧目
+    await _importCovers();
   }
 
   if (kDebugMode) {
@@ -54,6 +60,68 @@ void main() async {
   }
 
   runApp(PaiqiApp(initialUser: effectiveUser));
+}
+
+/// 匹配 covers 目录中的图片到数据库剧目
+Future<void> _importCovers() async {
+  try {
+    final appDir = await getApplicationDocumentsDirectory();
+    final coversDir = Directory(p.join(appDir.path, 'covers'));
+    if (!await coversDir.exists()) return;
+
+    final files = coversDir.listSync().whereType<File>().where(
+      (f) => f.path.endsWith('.jpg') || f.path.endsWith('.png'),
+    ).toList();
+    if (files.isEmpty) return;
+
+    final db = DatabaseHelper.instance;
+    final shows = await db.getAllShows();
+
+    int imported = 0;
+    for (final show in shows) {
+      if (show.coverPath != null && show.coverPath!.isNotEmpty) {
+        final existing = File(show.coverPath!);
+        if (await existing.exists()) continue;
+      }
+
+      final safeName = CoverHelper.sanitizeFileName(show.name);
+      File? bestMatch;
+
+      for (final file in files) {
+        final baseName = p.basename(file.path);
+        if (baseName.startsWith(safeName)) {
+          bestMatch = file;
+          break;
+        }
+        final nameWithoutExt = p.basenameWithoutExtension(file.path);
+        if (nameWithoutExt.startsWith(show.name) ||
+            nameWithoutExt.startsWith(safeName)) {
+          bestMatch = file;
+          break;
+        }
+      }
+
+      if (bestMatch == null) continue;
+
+      final newPath = p.join(coversDir.path, '${safeName}_封面.jpg');
+      if (bestMatch.path != newPath) {
+        if (await File(newPath).exists()) {
+          await File(newPath).delete();
+        }
+        await bestMatch.rename(newPath);
+      }
+
+      await db.updateShow(show.copyWith(coverPath: newPath));
+      imported++;
+      debugPrint('[CoverImport] 已导入: ${show.name}');
+    }
+
+    if (imported > 0) {
+      debugPrint('[CoverImport] 完成，共导入 $imported 张海报');
+    }
+  } catch (e) {
+    debugPrint('[CoverImport] 错误: $e');
+  }
 }
 
 class PaiqiApp extends StatelessWidget {
