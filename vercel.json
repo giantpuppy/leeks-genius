@@ -3,7 +3,7 @@
   "buildCommand": "bash vercel-build.sh",
   "outputDirectory": "build/web",
   "installCommand": "echo 'skip install'",
-  "framework": "null",
+  "framework": null,
   "headers": [
     {
       "source": "/(.*)",
