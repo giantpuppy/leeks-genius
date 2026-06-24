@@ -113,8 +113,8 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="ocr_bridge.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script defer src="ocr_bridge.js"></script>
   <script>
     // 禁用旧 service worker，避免缓存导致的 localhost 连接问题
     if ('serviceWorker' in navigator) {
