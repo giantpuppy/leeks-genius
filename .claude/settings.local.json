@@ -141,7 +141,12 @@
       "Bash(start *)",
       "Bash(npm list *)",
       "Bash(npm install *)",
-      "Bash(where ngrok *)"
+      "Bash(where ngrok *)",
+      "Bash(pkill -f \"flutter run\")",
+      "Bash(env)",
+      "Bash(npx netlify *)",
+      "Bash(mkdir -p docs)",
+      "Bash(cp -r build/web/* docs/)"
     ]
   },
   "hooks": {

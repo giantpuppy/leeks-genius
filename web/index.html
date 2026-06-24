@@ -104,6 +104,7 @@
     <div class="title">排期天菜</div>
     <div class="subtitle">首次加载约需 10 秒，请耐心等待…</div>
     <div class="bar-wrap"><div class="bar"></div></div>
+    <div id="error-display" style="display:none;margin-top:24px;max-width:90%;padding:12px;background:#2a1a1a;border:1px solid #f54a45;border-radius:8px;color:#f54a45;font-size:12px;word-break:break-all;text-align:left;"></div>
   </div>
   <!--
     You can customize the "flutter_bootstrap.js" script.
@@ -124,12 +125,18 @@
         }
       });
     }
-    // 捕获未处理的错误，防止白屏
+    // 捕获未处理的错误，显示在加载页面上
     window.addEventListener('error', function(e) {
-      console.warn('[GlobalError]', e.message, e.filename, e.lineno);
+      var msg = '[Error] ' + e.message + ' (' + e.filename + ':' + e.lineno + ')';
+      console.warn(msg);
+      var el = document.getElementById('error-display');
+      if (el) { el.textContent = msg; el.style.display = 'block'; }
     });
     window.addEventListener('unhandledrejection', function(e) {
-      console.warn('[UnhandledRejection]', String(e.reason));
+      var msg = '[Promise] ' + String(e.reason);
+      console.warn(msg);
+      var el = document.getElementById('error-display');
+      if (el) { el.textContent = msg; el.style.display = 'block'; }
       e.preventDefault();
     });
     // 拦截 buildConfig 设置，移除空的 build 项
@@ -160,11 +167,18 @@
         setTimeout(function() { el.remove(); }, 400);
       }
     });
-    // 兜底：如果 flutter-first-frame 没触发，30 秒后也移除
+    // 兜底：如果 flutter-first-frame 没触发，30 秒后显示提示
+    setTimeout(function() {
+      var el = document.getElementById('loading');
+      if (el) {
+        var sub = el.querySelector('.subtitle');
+        if (sub) sub.textContent = '加载时间较长，请检查网络或刷新重试…';
+      }
+    }, 15000);
     setTimeout(function() {
       var el = document.getElementById('loading');
       if (el) el.remove();
-    }, 30000);
+    }, 60000);
   </script>
 </body>
 </html>
